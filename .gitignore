@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.db
+*.sqlite3
+build/
+dist/
+installer_output/
+*.exe
+*.spec
+29B2-B7B8-062D-20BB.txt
