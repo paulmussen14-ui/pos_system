@@ -2,6 +2,7 @@
 
 from repositories.producto_repository import ProductoRepository
 from models.producto import Producto
+from models.producto_presentacion import ProductoPresentacion
 
 
 class ProductoError(Exception):
@@ -86,3 +87,46 @@ class ProductoService:
         if not nombre:
             raise ProductoError("El nombre del proveedor es obligatorio.")
         return self.producto_repo.crear_proveedor(nombre, documento, telefono, direccion)
+
+    # ---- Presentaciones de venta (caja, docena, paquete, etc.) ----
+    def presentaciones(self, producto_id: int) -> list[ProductoPresentacion]:
+        return self.producto_repo.listar_presentaciones(producto_id)
+
+    def guardar_presentaciones(self, producto_id: int, filas: list[dict]) -> None:
+        """Recibe la lista de presentaciones tal como quedó en el formulario
+        (cada fila: {"nombre": str, "cantidad_unidades": float, "precio": float}),
+        valida y reemplaza todas las presentaciones del producto.
+        Filas completamente vacías se ignoran (el usuario dejó una fila sin usar)."""
+        presentaciones: list[ProductoPresentacion] = []
+        for fila in filas:
+            nombre = (fila.get("nombre") or "").strip()
+            cantidad = fila.get("cantidad_unidades")
+            precio = fila.get("precio")
+
+            if not nombre and not cantidad and not precio:
+                continue  # fila vacía, se descarta sin avisar
+
+            if not nombre:
+                raise ProductoError("Cada presentación necesita un nombre (ej. Caja, Docena).")
+            try:
+                cantidad = float(cantidad)
+                precio = float(precio)
+            except (TypeError, ValueError):
+                raise ProductoError(f"La presentación \"{nombre}\" tiene cantidad o precio inválido.")
+            if cantidad <= 0:
+                raise ProductoError(f"La presentación \"{nombre}\" debe equivaler a más de 0 unidades.")
+            if precio < 0:
+                raise ProductoError(f"La presentación \"{nombre}\" no puede tener precio negativo.")
+
+            presentaciones.append(
+                ProductoPresentacion(
+                    id=None, producto_id=producto_id, nombre=nombre,
+                    cantidad_unidades=cantidad, precio=precio,
+                )
+            )
+
+        nombres = [p.nombre.lower() for p in presentaciones]
+        if len(nombres) != len(set(nombres)):
+            raise ProductoError("Hay presentaciones con el mismo nombre; usa nombres distintos.")
+
+        self.producto_repo.reemplazar_presentaciones(producto_id, presentaciones)

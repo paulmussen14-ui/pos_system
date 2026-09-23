@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox
 )
+from PySide6.QtCore import QTimer
 
 from services.producto_service import ProductoService, ProductoError
 from services.configuracion_service import ConfiguracionService
@@ -20,6 +21,14 @@ class ProductosPage(QWidget):
         self.usuario = usuario
         self.producto_service = ProductoService()
         self.config_service = ConfiguracionService()
+
+        # Debounce: evita disparar una consulta a la BD por cada tecla
+        # presionada. Se espera 300ms de inactividad antes de buscar.
+        self._timer_busqueda = QTimer(self)
+        self._timer_busqueda.setSingleShot(True)
+        self._timer_busqueda.setInterval(300)
+        self._timer_busqueda.timeout.connect(self.actualizar)
+
         self._construir_ui()
         self.actualizar()
 
@@ -37,7 +46,7 @@ class ProductosPage(QWidget):
         self.input_busqueda = QLineEdit()
         self.input_busqueda.setPlaceholderText("Buscar producto por nombre...")
         self.input_busqueda.setFixedWidth(260)
-        self.input_busqueda.textChanged.connect(self.actualizar)
+        self.input_busqueda.textChanged.connect(self._on_texto_busqueda)
         cabecera.addWidget(self.input_busqueda)
 
         btn_nuevo = QPushButton("+ Nuevo producto")
@@ -58,6 +67,10 @@ class ProductosPage(QWidget):
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.tabla)
+
+    def _on_texto_busqueda(self) -> None:
+        """Reinicia el temporizador de debounce en cada tecla."""
+        self._timer_busqueda.start()
 
     def actualizar(self) -> None:
         config = self.config_service.obtener()

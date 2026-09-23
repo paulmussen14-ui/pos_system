@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
     QMessageBox
 )
+from PySide6.QtCore import QTimer
 
 from services.cliente_service import ClienteService, ClienteError
 from utils.validators import formatear_moneda
@@ -114,6 +115,14 @@ class ClientesPage(QWidget):
         super().__init__(parent)
         self.usuario = usuario
         self.cliente_service = ClienteService()
+
+        # Debounce: evita disparar una consulta a la BD por cada tecla
+        # presionada. Se espera 300ms de inactividad antes de buscar.
+        self._timer_busqueda = QTimer(self)
+        self._timer_busqueda.setSingleShot(True)
+        self._timer_busqueda.setInterval(300)
+        self._timer_busqueda.timeout.connect(self.actualizar)
+
         self._construir_ui()
         self.actualizar()
 
@@ -131,7 +140,7 @@ class ClientesPage(QWidget):
         self.input_busqueda = QLineEdit()
         self.input_busqueda.setPlaceholderText("Buscar cliente...")
         self.input_busqueda.setFixedWidth(240)
-        self.input_busqueda.textChanged.connect(self.actualizar)
+        self.input_busqueda.textChanged.connect(self._on_texto_busqueda)
         cabecera.addWidget(self.input_busqueda)
 
         btn_nuevo = QPushButton("+ Nuevo cliente")
@@ -152,6 +161,10 @@ class ClientesPage(QWidget):
         self.tabla.setAlternatingRowColors(True)
         self.tabla.setStyleSheet(ESTILO_TABLA)
         layout.addWidget(self.tabla)
+
+    def _on_texto_busqueda(self) -> None:
+        """Reinicia el temporizador de debounce en cada tecla."""
+        self._timer_busqueda.start()
 
     def actualizar(self) -> None:
         clientes = self.cliente_service.listar(self.input_busqueda.text())

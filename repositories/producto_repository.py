@@ -2,6 +2,7 @@
 
 from database.connection import get_db
 from models.producto import Producto
+from models.producto_presentacion import ProductoPresentacion
 
 _SELECT_BASE = """
     SELECT p.*, c.nombre AS categoria_nombre, pr.nombre AS proveedor_nombre
@@ -137,3 +138,26 @@ class ProductoRepository:
                 (nombre, documento, telefono, direccion),
             )
             return cur.lastrowid
+
+    # ---- Presentaciones de venta (caja, docena, paquete, etc.) ----
+    def listar_presentaciones(self, producto_id: int) -> list[ProductoPresentacion]:
+        cur = self.db.get_connection().execute(
+            "SELECT * FROM producto_presentaciones WHERE producto_id = ? AND activo = 1 "
+            "ORDER BY orden ASC, id ASC",
+            (producto_id,),
+        )
+        return [ProductoPresentacion.from_row(r) for r in cur.fetchall()]
+
+    def reemplazar_presentaciones(self, producto_id: int, presentaciones: list[ProductoPresentacion]) -> None:
+        """Borra las presentaciones actuales del producto y guarda la lista
+        nueva completa. Se usa así (en vez de diff) porque el formulario
+        siempre envía el estado final de la lista tal como quedó editada."""
+        with self.db.transaction() as cur:
+            cur.execute("DELETE FROM producto_presentaciones WHERE producto_id = ?", (producto_id,))
+            for orden, p in enumerate(presentaciones):
+                cur.execute(
+                    """INSERT INTO producto_presentaciones
+                       (producto_id, nombre, cantidad_unidades, precio, orden, activo)
+                       VALUES (?, ?, ?, ?, ?, 1)""",
+                    (producto_id, p.nombre, p.cantidad_unidades, p.precio, orden),
+                )

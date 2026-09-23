@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QDoubleSpinBox,
     QMessageBox, QSplitter, QDialog
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from services.producto_service import ProductoService
 from services.venta_service import VentaService, VentaError
@@ -94,6 +94,18 @@ class VentasPage(QWidget):
         self.cliente_seleccionado_id: int | None = None
         self.cliente_seleccionado_nombre: str | None = None
 
+        # Debounce: evita disparar una consulta a la BD por cada tecla
+        # presionada en las búsquedas de producto y de cliente.
+        self._timer_busqueda_producto = QTimer(self)
+        self._timer_busqueda_producto.setSingleShot(True)
+        self._timer_busqueda_producto.setInterval(300)
+        self._timer_busqueda_producto.timeout.connect(self._buscar_productos)
+
+        self._timer_busqueda_cliente = QTimer(self)
+        self._timer_busqueda_cliente.setSingleShot(True)
+        self._timer_busqueda_cliente.setInterval(300)
+        self._timer_busqueda_cliente.timeout.connect(self._buscar_clientes)
+
         self._construir_ui()
         self._cargar_metodos_pago()
         self.actualizar_totales()
@@ -126,7 +138,9 @@ class VentasPage(QWidget):
 
         self.input_busqueda_producto = QLineEdit()
         self.input_busqueda_producto.setPlaceholderText("Buscar producto por nombre...")
-        self.input_busqueda_producto.textChanged.connect(self._buscar_productos)
+        self.input_busqueda_producto.textChanged.connect(
+            lambda: self._timer_busqueda_producto.start()
+        )
         columna_productos.addWidget(self.input_busqueda_producto)
 
         self.tabla_productos = QTableWidget(0, 4)
@@ -161,7 +175,9 @@ class VentasPage(QWidget):
 
         self.input_busqueda_cliente = QLineEdit()
         self.input_busqueda_cliente.setPlaceholderText("Buscar cliente por nombre...")
-        self.input_busqueda_cliente.textChanged.connect(self._buscar_clientes)
+        self.input_busqueda_cliente.textChanged.connect(
+            lambda: self._timer_busqueda_cliente.start()
+        )
         columna_clientes.addWidget(self.input_busqueda_cliente)
 
         self.tabla_clientes = QTableWidget(0, 2)
@@ -256,12 +272,21 @@ class VentasPage(QWidget):
         contenedor_derecho = QWidget()
         contenedor_derecho.setLayout(columna_derecha)
 
-        splitter.addWidget(contenedor_productos)
-        splitter.addWidget(contenedor_clientes)
+        # ---- Columna izquierda: Cliente arriba, Productos debajo ----
+        # (apilados verticalmente para que ambas tablas tengan ancho
+        # completo y se vean todos sus campos sin comprimirse).
+        columna_izquierda = QVBoxLayout()
+        columna_izquierda.setSpacing(16)
+        columna_izquierda.addWidget(contenedor_clientes)
+        columna_izquierda.addWidget(contenedor_productos)
+
+        contenedor_izquierdo = QWidget()
+        contenedor_izquierdo.setLayout(columna_izquierda)
+
+        splitter.addWidget(contenedor_izquierdo)
         splitter.addWidget(contenedor_derecho)
-        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
-        splitter.setStretchFactor(2, 3)
 
         layout_principal.addWidget(splitter)
 

@@ -2,7 +2,8 @@
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox,
-    QDoubleSpinBox, QPushButton, QHBoxLayout, QMessageBox, QInputDialog
+    QDoubleSpinBox, QPushButton, QHBoxLayout, QMessageBox, QInputDialog,
+    QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 
 from services.producto_service import ProductoService, ProductoError
@@ -21,7 +22,7 @@ class ProductoFormDialog(QDialog):
 
     def _construir_ui(self) -> None:
         self.setWindowTitle("Editar producto" if self.producto else "Nuevo producto")
-        self.resize(420, 420)
+        self.resize(460, 620)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -75,6 +76,50 @@ class ProductoFormDialog(QDialog):
 
         layout.addLayout(form)
 
+        # ---- Presentaciones de venta (caja, docena, paquete, etc.) ----
+        # Precio y unidad de arriba = presentación base "unidad". Aquí se
+        # agregan formas extra de vender el mismo producto sin duplicarlo.
+        label_presentaciones = QLabel("Presentaciones adicionales (caja, docena, paquete...):")
+        label_presentaciones.setStyleSheet("font-weight: 600; margin-top: 6px;")
+        layout.addWidget(label_presentaciones)
+
+        ayuda_presentaciones = QLabel(
+            "La unidad de arriba ya es una presentación (\"Unidad\"). Agrega aquí "
+            "otras formas de vender este producto: cuántas unidades equivale y a "
+            "qué precio se vende esa presentación completa."
+        )
+        ayuda_presentaciones.setWordWrap(True)
+        ayuda_presentaciones.setStyleSheet("color: #6b7280; font-size: 11px;")
+        layout.addWidget(ayuda_presentaciones)
+
+        self.tabla_presentaciones = QTableWidget(0, 3)
+        self.tabla_presentaciones.setHorizontalHeaderLabels(
+            ["Nombre (ej. Caja)", "Equivale a (unidades)", "Precio de venta"]
+        )
+        header_pres = self.tabla_presentaciones.horizontalHeader()
+        header_pres.setSectionResizeMode(0, QHeaderView.Stretch)
+        header_pres.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header_pres.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.tabla_presentaciones.verticalHeader().setVisible(False)
+        self.tabla_presentaciones.setEditTriggers(
+            QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
+        )
+        self.tabla_presentaciones.setMinimumHeight(140)
+        layout.addWidget(self.tabla_presentaciones)
+
+        fila_botones_presentaciones = QHBoxLayout()
+        btn_agregar_presentacion = QPushButton("+ Agregar presentación")
+        btn_agregar_presentacion.setProperty("class", "secondary")
+        btn_agregar_presentacion.clicked.connect(self._agregar_fila_presentacion)
+        fila_botones_presentaciones.addWidget(btn_agregar_presentacion)
+
+        btn_quitar_presentacion = QPushButton("Quitar seleccionada")
+        btn_quitar_presentacion.setProperty("class", "secondary")
+        btn_quitar_presentacion.clicked.connect(self._quitar_fila_presentacion)
+        fila_botones_presentaciones.addWidget(btn_quitar_presentacion)
+        fila_botones_presentaciones.addStretch()
+        layout.addLayout(fila_botones_presentaciones)
+
         botones = QHBoxLayout()
         btn_cancelar = QPushButton("Cancelar")
         btn_cancelar.setProperty("class", "secondary")
@@ -114,6 +159,32 @@ class ProductoFormDialog(QDialog):
             except ProductoError as e:
                 QMessageBox.warning(self, "Error", str(e))
 
+    def _agregar_fila_presentacion(self, nombre: str = "", cantidad: str = "", precio: str = "") -> None:
+        fila = self.tabla_presentaciones.rowCount()
+        self.tabla_presentaciones.insertRow(fila)
+        self.tabla_presentaciones.setItem(fila, 0, QTableWidgetItem(nombre))
+        self.tabla_presentaciones.setItem(fila, 1, QTableWidgetItem(cantidad))
+        self.tabla_presentaciones.setItem(fila, 2, QTableWidgetItem(precio))
+
+    def _quitar_fila_presentacion(self) -> None:
+        fila = self.tabla_presentaciones.currentRow()
+        if fila >= 0:
+            self.tabla_presentaciones.removeRow(fila)
+
+    def _leer_filas_presentaciones(self) -> list[dict]:
+        filas = []
+        for fila in range(self.tabla_presentaciones.rowCount()):
+            def texto(col):
+                item = self.tabla_presentaciones.item(fila, col)
+                return item.text().strip() if item else ""
+
+            filas.append({
+                "nombre": texto(0),
+                "cantidad_unidades": texto(1),
+                "precio": texto(2),
+            })
+        return filas
+
     def _precargar_datos(self) -> None:
         p = self.producto
         self.input_nombre.setText(p.nombre)
@@ -131,6 +202,13 @@ class ProductoFormDialog(QDialog):
             if idx >= 0:
                 self.combo_proveedor.setCurrentIndex(idx)
 
+        for presentacion in self.producto_service.presentaciones(p.id):
+            self._agregar_fila_presentacion(
+                presentacion.nombre,
+                str(presentacion.cantidad_unidades),
+                str(presentacion.precio),
+            )
+
     def _guardar(self) -> None:
         try:
             if self.producto:
@@ -144,8 +222,9 @@ class ProductoFormDialog(QDialog):
                     self.input_stock_minimo.value(),
                     self.combo_proveedor.currentData(),
                 )
+                producto_id = self.producto.id
             else:
-                self.producto_service.crear_producto(
+                producto_id = self.producto_service.crear_producto(
                     self.input_nombre.text(),
                     self.combo_categoria.currentData(),
                     self.input_marca.text(),
@@ -156,6 +235,10 @@ class ProductoFormDialog(QDialog):
                     self.combo_proveedor.currentData(),
                     self.input_costo_inicial.value(),
                 )
+
+            self.producto_service.guardar_presentaciones(
+                producto_id, self._leer_filas_presentaciones()
+            )
         except ProductoError as e:
             QMessageBox.warning(self, "No se pudo guardar", str(e))
             return
