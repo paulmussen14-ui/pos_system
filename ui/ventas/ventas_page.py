@@ -215,9 +215,9 @@ class VentasPage(QWidget):
         # ---- Columna derecha: carrito ----
         columna_derecha = QVBoxLayout()
 
-        self.tabla_carrito = QTableWidget(0, 6)
+        self.tabla_carrito = QTableWidget(0, 7)
         self.tabla_carrito.setHorizontalHeaderLabels(
-            ["#", "Producto", "Cantidad", "Precio", "Subtotal", ""]
+            ["#", "Producto", "Presentación", "Cantidad", "Precio", "Subtotal", ""]
         )
         header = self.tabla_carrito.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -225,9 +225,10 @@ class VentasPage(QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.Fixed)
         self.tabla_carrito.setColumnWidth(0, ANCHO_COLUMNA_NUMERO)
-        self.tabla_carrito.setColumnWidth(5, ANCHO_COLUMNA_QUITAR)
+        self.tabla_carrito.setColumnWidth(6, ANCHO_COLUMNA_QUITAR)
         self.tabla_carrito.verticalHeader().setVisible(False)
         self.tabla_carrito.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tabla_carrito.setAlternatingRowColors(True)
@@ -340,7 +341,11 @@ class VentasPage(QWidget):
 
         existente = next((l for l in self.carrito if l.producto_id == producto.id), None)
         if existente:
-            existente.cantidad += 1
+            # Se suma 1 en la MISMA presentación que ya tenía esa línea,
+            # no en unidades base, para no descuadrar lo que el usuario ya
+            # había elegido (ej. si ya vendía por "Caja", sigue sumando cajas).
+            existente.cantidad_presentacion += 1
+            existente.cantidad = round(existente.cantidad_presentacion * existente.factor_unidades, 4)
         else:
             self.carrito.append(VentaDetalleItem(
                 producto_id=producto.id,
@@ -348,6 +353,9 @@ class VentasPage(QWidget):
                 cantidad=1,
                 precio_venta_unitario=producto.precio_venta_actual,
                 costo_unitario_snapshot=producto.costo_promedio_actual,
+                presentacion_nombre="Unidad",
+                cantidad_presentacion=1,
+                factor_unidades=1.0,
             ))
         self._refrescar_tabla_carrito()
 
@@ -390,34 +398,90 @@ class VentasPage(QWidget):
 
             self.tabla_carrito.setItem(fila, 1, QTableWidgetItem(linea.nombre_producto))
 
+            # Combo de presentación: "Unidad" + las que tenga configuradas el
+            # producto (igual que en Compras). Se arma y se posiciona en la
+            # presentación actual de la línea ANTES de conectar la señal,
+            # para que ese setCurrentIndex no dispare _cambiar_presentacion.
+            combo_presentacion = QComboBox()
+            combo_presentacion.addItem("Unidad", (1.0, "Unidad"))
+            for p in self.producto_service.presentaciones(linea.producto_id):
+                combo_presentacion.addItem(
+                    f"{p.nombre} (x{p.cantidad_unidades:g})", (p.cantidad_unidades, p.nombre)
+                )
+            idx_actual = 0
+            for i in range(combo_presentacion.count()):
+                _, nombre_i = combo_presentacion.itemData(i)
+                if nombre_i == linea.presentacion_nombre:
+                    idx_actual = i
+                    break
+            combo_presentacion.setCurrentIndex(idx_actual)
+            combo_presentacion.currentIndexChanged.connect(
+                lambda _, idx=fila, combo=combo_presentacion: self._cambiar_presentacion(idx, combo)
+            )
+            self.tabla_carrito.setCellWidget(fila, 2, combo_presentacion)
+
+            # La cantidad que edita el usuario es la cantidad DE ESA
+            # PRESENTACIÓN (ej. "2" cajas), no las unidades base.
             spin_cantidad = QDoubleSpinBox()
             spin_cantidad.setMinimum(0.01)
             spin_cantidad.setMaximum(999999)
-            spin_cantidad.setValue(linea.cantidad)
+            spin_cantidad.setValue(linea.cantidad_presentacion)
             spin_cantidad.valueChanged.connect(lambda valor, idx=fila: self._cambiar_cantidad(idx, valor))
-            self.tabla_carrito.setCellWidget(fila, 2, spin_cantidad)
+            self.tabla_carrito.setCellWidget(fila, 3, spin_cantidad)
 
-            self.tabla_carrito.setItem(fila, 3, QTableWidgetItem(formatear_moneda(linea.precio_venta_unitario, moneda)))
-            self.tabla_carrito.setItem(fila, 4, QTableWidgetItem(formatear_moneda(linea.subtotal, moneda)))
+            self.tabla_carrito.setItem(
+                fila, 4, QTableWidgetItem(formatear_moneda(linea.precio_presentacion_unitario, moneda))
+            )
+            self.tabla_carrito.setItem(fila, 5, QTableWidgetItem(formatear_moneda(linea.subtotal, moneda)))
 
             btn_quitar = QPushButton("✕")
             btn_quitar.setProperty("class", "danger")
             btn_quitar.setMinimumSize(40, 32)
             btn_quitar.clicked.connect(lambda _, idx=fila: self._quitar_linea(idx))
-            self.tabla_carrito.setCellWidget(fila, 5, btn_quitar)
+            self.tabla_carrito.setCellWidget(fila, 6, btn_quitar)
 
             self.tabla_carrito.setRowHeight(fila, ALTURA_FILA_CARRITO)
 
         self.actualizar_totales()
 
-    def _cambiar_cantidad(self, indice: int, nueva_cantidad: float) -> None:
+    def _cambiar_cantidad(self, indice: int, nueva_cantidad_presentacion: float) -> None:
         if 0 <= indice < len(self.carrito):
-            self.carrito[indice].cantidad = nueva_cantidad
+            linea = self.carrito[indice]
+            linea.cantidad_presentacion = nueva_cantidad_presentacion
+            linea.cantidad = round(nueva_cantidad_presentacion * linea.factor_unidades, 4)
             moneda = self.config_service.obtener().get("moneda", "S/")
-            self.tabla_carrito.setItem(indice, 4, QTableWidgetItem(
-                formatear_moneda(self.carrito[indice].subtotal, moneda)
+            self.tabla_carrito.setItem(indice, 5, QTableWidgetItem(
+                formatear_moneda(linea.subtotal, moneda)
             ))
             self.actualizar_totales()
+
+    def _cambiar_presentacion(self, indice: int, combo: QComboBox) -> None:
+        """Al elegir otra presentación en el carrito, se recalcula el precio
+        por unidad base y las unidades base (cantidad) a partir de la
+        cantidad de esa presentación que ya tenía la línea, igual que en
+        Compras."""
+        if not (0 <= indice < len(self.carrito)):
+            return
+        linea = self.carrito[indice]
+        factor, nombre_presentacion = combo.currentData() or (1.0, "Unidad")
+
+        if nombre_presentacion == "Unidad":
+            producto = self.producto_service.obtener(linea.producto_id)
+            precio_unitario_base = producto.precio_venta_actual if producto else linea.precio_venta_unitario
+        else:
+            presentacion = next(
+                (p for p in self.producto_service.presentaciones(linea.producto_id)
+                 if p.nombre == nombre_presentacion),
+                None,
+            )
+            precio_unitario_base = presentacion.precio_por_unidad if presentacion else linea.precio_venta_unitario
+
+        linea.presentacion_nombre = nombre_presentacion
+        linea.factor_unidades = factor
+        linea.precio_venta_unitario = precio_unitario_base
+        linea.cantidad = round(linea.cantidad_presentacion * factor, 4)
+
+        self._refrescar_tabla_carrito()
 
     def _quitar_linea(self, indice: int) -> None:
         if 0 <= indice < len(self.carrito):
