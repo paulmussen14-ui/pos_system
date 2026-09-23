@@ -21,12 +21,44 @@ generados por printing/qr_yape.py.
 """
 
 import sys
+import unicodedata
 from pathlib import Path
 
 from config import APP_DATA_DIR
 from utils.logger import logger
 from printing.ticket_template import generar_copias_ticket, MARCADOR_QR_YAPE
 from printing.qr_yape import generar_bytes_qr_escpos
+
+# --- Codificacion del ticket para la impresora termica ---
+# Las impresoras termicas no entienden UTF-8: usan una "tabla de caracteres".
+# CP858 (ESC t 19) trae n con tilde, vocales acentuadas y signos de espanol.
+# Si en tu impresora los acentos salen mal, prueba con
+# probar_acentos_impresora.py y cambia estas dos constantes:
+#   CP858 -> ("cp858", 19)   CP850 -> ("cp850", 2)   CP437 -> ("cp437", 0)
+CODEPAGE_PYTHON = "cp858"
+CODEPAGE_ESCPOS = 19
+
+# ESC @ (reiniciar impresora) + ESC t n (elegir tabla de caracteres).
+INICIO_IMPRESORA = b"\x1b@" + b"\x1bt" + bytes([CODEPAGE_ESCPOS])
+
+
+def _codificar(texto: str) -> bytes:
+    """Codifica el texto a la tabla de la impresora. Un caracter que la tabla
+    no tenga se reemplaza por su letra base (sin acento) o por "?"; nunca
+    falla ni imprime basura."""
+    try:
+        return texto.encode(CODEPAGE_PYTHON)
+    except UnicodeEncodeError:
+        pass
+
+    partes = []
+    for caracter in texto:
+        try:
+            partes.append(caracter.encode(CODEPAGE_PYTHON))
+        except UnicodeEncodeError:
+            base = unicodedata.normalize("NFKD", caracter).encode("ascii", "ignore")
+            partes.append(base or b"?")
+    return b"".join(partes)
 
 
 class TicketPrinterError(Exception):
@@ -36,7 +68,7 @@ class TicketPrinterError(Exception):
 def imprimir_ticket(texto_ticket: str, nombre_impresora: str | None = None) -> None:
     """Imprime un único texto de ticket ya generado (se mantiene por compatibilidad)."""
     if sys.platform == "win32" and nombre_impresora:
-        _imprimir_windows_bytes([texto_ticket.encode("utf-8", errors="replace")], nombre_impresora)
+        _imprimir_windows_bytes([INICIO_IMPRESORA + _codificar(texto_ticket)], nombre_impresora)
     else:
         _guardar_ticket_simulado(texto_ticket, "ultimo_ticket.txt")
 
@@ -75,26 +107,27 @@ def imprimir_ticket_venta(
 
 def _texto_a_bytes(texto: str, config_negocio: dict, ancho_papel_mm: int) -> bytes:
     """
-    Codifica el texto del ticket a bytes, reemplazando MARCADOR_QR_YAPE por
-    los bytes reales del comando ESC/POS de imagen del QR de Yape. Si no
-    hay QR configurado, si la generación falla (imagen faltante, corrupta,
-    Pillow no instalado, etc.), el ticket se imprime igual sin el QR y el
-    error queda en el log — nunca se bloquea la venta por esto.
+    Codifica el texto del ticket a bytes para la impresora (tabla CP858, ver
+    arriba), reemplazando MARCADOR_QR_YAPE por los bytes reales del comando
+    ESC/POS de imagen del QR de Yape. Cada copia empieza con INICIO_IMPRESORA.
+    Si no hay QR configurado, o si la generacion falla (imagen faltante,
+    corrupta, Pillow no instalado, etc.), el ticket se imprime igual sin el
+    QR y el error queda en el log: nunca se bloquea la venta por esto.
     """
     ruta_qr = config_negocio.get("qr_yape_path")
     if not ruta_qr or MARCADOR_QR_YAPE not in texto:
-        return texto.replace(MARCADOR_QR_YAPE, "").encode("utf-8", errors="replace")
+        return INICIO_IMPRESORA + _codificar(texto.replace(MARCADOR_QR_YAPE, ""))
 
     try:
         bytes_qr = generar_bytes_qr_escpos(ruta_qr, ancho_papel_mm)
     except Exception as exc:
         logger.error(f"No se pudo generar el QR de Yape para el ticket: {exc}")
-        return texto.replace(MARCADOR_QR_YAPE, "").encode("utf-8", errors="replace")
+        return INICIO_IMPRESORA + _codificar(texto.replace(MARCADOR_QR_YAPE, ""))
 
     partes = texto.split(MARCADOR_QR_YAPE)
-    resultado = partes[0].encode("utf-8", errors="replace")
+    resultado = INICIO_IMPRESORA + _codificar(partes[0])
     for parte in partes[1:]:
-        resultado += bytes_qr + parte.encode("utf-8", errors="replace")
+        resultado += bytes_qr + _codificar(parte)
     return resultado
 
 
@@ -104,7 +137,7 @@ def _imprimir_windows_bytes(bloques: list[bytes], nombre_impresora: str) -> None
     except ImportError:
         logger.warning("pywin32 no está instalado; se guardan los tickets en lugar de imprimirlos.")
         for i, bloque in enumerate(bloques, start=1):
-            _guardar_ticket_simulado(bloque.decode("utf-8", errors="replace"), f"ultimo_ticket_{i}.txt")
+            _guardar_ticket_simulado(bloque.decode(CODEPAGE_PYTHON, errors="replace"), f"ultimo_ticket_{i}.txt")
         return
 
     try:
