@@ -120,18 +120,29 @@ class VentaService:
 
         lineas = self.venta_repo.obtener_lineas(venta_id)
 
+        # Cantidad vendida por producto (una venta puede repetir un producto
+        # en varias lineas).
+        vendido: dict[int, float] = {}
+        for linea in lineas:
+            vendido[linea["producto_id"]] = vendido.get(linea["producto_id"], 0.0) + linea["cantidad"]
+
         with self.db.transaction() as cur:
             self.venta_repo.anular_venta(cur, venta_id)
 
-            for linea in lineas:
-                cur.execute("SELECT stock_actual FROM productos WHERE id = ?", (linea["producto_id"],))
+            for producto_id, cantidad_vendida in vendido.items():
+                # Lo que ya volvio al stock por devoluciones no se repone otra vez.
+                ya_devuelto = self.venta_repo.cantidad_devuelta(cur, venta_id, producto_id)
+                a_reponer = round(cantidad_vendida - ya_devuelto, 6)
+                if a_reponer <= 0:
+                    continue
+
+                cur.execute("SELECT stock_actual FROM productos WHERE id = ?", (producto_id,))
                 stock_actual = cur.fetchone()["stock_actual"]
-                nuevo_stock = stock_actual + linea["cantidad"]
                 cur.execute("UPDATE productos SET stock_actual = ? WHERE id = ?",
-                            (nuevo_stock, linea["producto_id"]))
+                            (stock_actual + a_reponer, producto_id))
 
                 self.inventario_repo.registrar_movimiento(
-                    cur, linea["producto_id"], "entrada", linea["cantidad"],
+                    cur, producto_id, "entrada", a_reponer,
                     "anulacion", venta_id, usuario_id,
                 )
 
@@ -149,16 +160,35 @@ class VentaService:
         if cantidad <= 0:
             raise VentaError("La cantidad a devolver debe ser mayor a cero.")
 
-        lineas = self.venta_repo.obtener_lineas(venta_id)
-        linea = next((l for l in lineas if l["producto_id"] == producto_id), None)
-        if not linea:
+        venta = self.venta_repo.obtener_venta(venta_id)
+        if not venta:
+            raise VentaError("Venta no encontrada.")
+        if venta["estado"] != "completada":
+            raise VentaError("No se puede devolver productos de una venta anulada.")
+
+        vendido = sum(
+            l["cantidad"] for l in self.venta_repo.obtener_lineas(venta_id)
+            if l["producto_id"] == producto_id
+        )
+        if vendido <= 0:
             raise VentaError("Ese producto no pertenece a la venta indicada.")
-        if cantidad > linea["cantidad"]:
-            raise VentaError("No puede devolver más cantidad de la vendida.")
 
-        devolucion_id = self.venta_repo.crear_devolucion(venta_id, producto_id, cantidad, motivo, usuario_id)
-
+        # Validacion y escritura en la MISMA transaccion: si dos devoluciones
+        # llegan seguidas, la segunda ya ve lo que devolvio la primera.
         with self.db.transaction() as cur:
+            ya_devuelto = self.venta_repo.cantidad_devuelta(cur, venta_id, producto_id)
+            disponible = round(vendido - ya_devuelto, 6)
+            if cantidad > disponible:
+                if disponible <= 0:
+                    raise VentaError("Este producto ya fue devuelto por completo.")
+                raise VentaError(
+                    f"Solo se puede devolver hasta {disponible:g} "
+                    f"(vendido: {vendido:g}, ya devuelto: {ya_devuelto:g})."
+                )
+
+            devolucion_id = self.venta_repo.crear_devolucion(
+                cur, venta_id, producto_id, cantidad, motivo, usuario_id
+            )
             cur.execute("SELECT stock_actual FROM productos WHERE id = ?", (producto_id,))
             stock_actual = cur.fetchone()["stock_actual"]
             cur.execute("UPDATE productos SET stock_actual = ? WHERE id = ?",

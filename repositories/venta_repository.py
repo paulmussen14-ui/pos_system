@@ -196,15 +196,25 @@ class VentaRepository:
         return bool(row["es_efectivo"]) if row else False
 
     # ---- Devoluciones ----
-    def crear_devolucion(self, venta_id: int, producto_id: int, cantidad: float,
+    def crear_devolucion(self, cursor, venta_id: int, producto_id: int, cantidad: float,
                           motivo: str, usuario_id: int) -> int:
-        with self.db.transaction() as cur:
-            cur.execute(
-                """INSERT INTO devoluciones (venta_id, producto_id, cantidad, motivo, usuario_id)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (venta_id, producto_id, cantidad, motivo, usuario_id),
-            )
-            return cur.lastrowid
+        """Recibe un cursor externo: la devolucion y la reposicion de stock
+        deben ocurrir en la MISMA transaccion (todo o nada)."""
+        cursor.execute(
+            """INSERT INTO devoluciones (venta_id, producto_id, cantidad, motivo, usuario_id)
+               VALUES (?, ?, ?, ?, ?)""",
+            (venta_id, producto_id, cantidad, motivo, usuario_id),
+        )
+        return cursor.lastrowid
+
+    def cantidad_devuelta(self, cursor, venta_id: int, producto_id: int) -> float:
+        """Total ya devuelto de un producto en una venta (unidad base)."""
+        cursor.execute(
+            """SELECT COALESCE(SUM(cantidad), 0) AS total
+               FROM devoluciones WHERE venta_id = ? AND producto_id = ?""",
+            (venta_id, producto_id),
+        )
+        return cursor.fetchone()["total"]
 
     def actualizar_cliente(self, cursor, venta_id: int, cliente_id: int | None) -> None:
         cursor.execute("UPDATE ventas SET cliente_id = ? WHERE id = ?", (cliente_id, venta_id))
