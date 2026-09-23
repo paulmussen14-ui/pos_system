@@ -27,4 +27,5 @@ def texto_no_vacio(texto: str) -> bool:
 
 
 def formatear_moneda(monto: float, simbolo: str = "S/") -> str:
+    monto = monto or 0
     return f"{simbolo} {monto:,.2f}"

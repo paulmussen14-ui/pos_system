@@ -1,6 +1,12 @@
 """
 Worker genérico para sacar tareas pesadas (consultas SQL, reportes, etc.)
 del hilo principal de la interfaz.
+...
+
+"""
+"""
+Worker genérico para sacar tareas pesadas (consultas SQL, reportes, etc.)
+del hilo principal de la interfaz.
 
 Uso típico en una página:
 
@@ -31,20 +37,22 @@ import traceback
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
+# QThreadPool.start() transfiere la propiedad del Worker a C++, que lo
+# destruye automáticamente al terminar run() (autoDelete=True). Si nada en
+# Python retiene una referencia al Worker (o a su `signals`), el recolector
+# de basura puede destruir el WorkerSignals ANTES de que la señal
+# finished/error -emitida desde el hilo en segundo plano- llegue a
+# procesarse en el hilo principal, perdiendo el resultado en silencio.
+# Por eso se guarda aquí una referencia fuerte a cada worker activo.
+_workers_activos: set["Worker"] = set()
+
 
 class WorkerSignals(QObject):
-    """Señales que puede emitir un Worker.
-
-    QRunnable no puede emitir señales directamente (no hereda de QObject),
-    por eso las señales viven en un QObject aparte que el Worker sostiene.
-    """
-    finished = Signal(object)   # resultado de la función, ya en el hilo principal
-    error = Signal(str)         # mensaje de error, ya en el hilo principal
+    finished = Signal(object)
+    error = Signal(str)
 
 
 class Worker(QRunnable):
-    """Ejecuta `fn(*args, **kwargs)` en un hilo del pool y reporta el
-    resultado (o el error) de vuelta al hilo principal vía señales."""
 
     def __init__(self, fn, *args, **kwargs):
         super().__init__()
@@ -52,6 +60,9 @@ class Worker(QRunnable):
         self.args = args
         self.kwargs = kwargs
         self.signals = WorkerSignals()
+        _workers_activos.add(self)
+        self.signals.finished.connect(lambda *_: _workers_activos.discard(self))
+        self.signals.error.connect(lambda *_: _workers_activos.discard(self))
 
     @Slot()
     def run(self) -> None:

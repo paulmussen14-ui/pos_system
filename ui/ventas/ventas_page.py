@@ -188,7 +188,7 @@ class VentasPage(QWidget):
 
 
         self._construir_ui()
-        self._cargar_metodos_pago()
+        self.actualizar()
         self.actualizar_totales()
 
 
