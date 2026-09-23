@@ -7,16 +7,27 @@ def generar_bytes_qr_escpos(ruta_imagen: str, ancho_papel_mm: int | None) -> byt
     """
     Genera el comando GS v 0 (raster bit image) para imprimir ruta_imagen
     en una impresora térmica ESC/POS. Ajusta el ancho a los dots físicos
-    del papel (58mm ~ 384 dots, 80mm ~ 576 dots) y aplica dithering al
-    convertir a blanco/negro puro.
+    del papel (58mm ~ 384 dots, 80mm ~ 576 dots).
+
+    Para que el QR siga siendo escaneable:
+    - Las imágenes con transparencia se pintan sobre fondo BLANCO (si no,
+      los píxeles transparentes se convierten en negro).
+    - Se binariza con umbral duro (sin dithering) ANTES de reescalar.
+    - Se reescala con NEAREST para no generar grises en los bordes.
     """
     ancho_dots = 576 if (ancho_papel_mm and ancho_papel_mm >= 80) else 384
 
-    img = Image.open(ruta_imagen).convert("L")
+    img = Image.open(ruta_imagen)
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        fondo = Image.new("RGBA", img.size, (255, 255, 255, 255))
+        img = Image.alpha_composite(fondo, img)
+    img = img.convert("L").point(lambda p: 255 if p >= 128 else 0)
+
     ratio = ancho_dots / img.width
     alto_dots = max(1, round(img.height * ratio))
-    img = img.resize((ancho_dots, alto_dots))
-    img = img.convert("1")  # blanco/negro puro, con dithering Floyd-Steinberg
+    img = img.resize((ancho_dots, alto_dots), Image.NEAREST)
+    img = img.convert("1")  # ya es blanco/negro puro: no hay nada que "dithear"
 
     ancho_bytes = (ancho_dots + 7) // 8
     pixeles = img.load()

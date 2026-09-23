@@ -82,10 +82,13 @@ QWidget#sidebarHeader {
     border-bottom: 1px solid #1f2937;
 }
 
+
 QFrame#logoCard {
     background-color: #ffffff;
     border-radius: 18px;
 }
+
+QLabel#sidebarUser { color: #94a3b8; font-size: 12px; }
 
 /* --- Cards --- */
 QFrame.card {

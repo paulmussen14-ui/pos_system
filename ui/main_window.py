@@ -24,6 +24,9 @@ from config import STYLES_DIR, APP_ICON_PATH, APP_LOGO_SIDEBAR_PATH
 TAMANO_TARJETA_LOGO = 96
 ALTO_LOGO_SIDEBAR = 64
 
+# Texto que se muestra en el sidebar si el negocio aún no tiene nombre.
+NOMBRE_NEGOCIO_POR_DEFECTO = "POS-Ventas"
+
 
 class MainWindow(QMainWindow):
 
@@ -57,7 +60,7 @@ class MainWindow(QMainWindow):
         layout_sidebar.setContentsMargins(0, 0, 0, 0)
         layout_sidebar.setSpacing(0)
 
-        # ---- Encabezado del sidebar: logo grande arriba, título debajo ----
+        # ---- Encabezado del sidebar: logo grande arriba, negocio y usuario debajo ----
         contenedor_titulo = QWidget()
         contenedor_titulo.setObjectName("sidebarHeader")
         layout_titulo = QVBoxLayout(contenedor_titulo)
@@ -82,12 +85,26 @@ class MainWindow(QMainWindow):
 
             layout_titulo.addWidget(tarjeta_logo, alignment=Qt.AlignHCenter)
 
-        titulo = QLabel("POS-Ventas")
-        titulo.setObjectName("sidebarTitle")
-        titulo.setAlignment(Qt.AlignHCenter)
-        layout_titulo.addWidget(titulo, alignment=Qt.AlignHCenter)
+        # Nombre del negocio (antes era el texto fijo "POS-Ventas") y, debajo,
+        # el nombre del usuario que inició sesión.
+        bloque_texto = QVBoxLayout()
+        bloque_texto.setSpacing(4)
 
+        self.label_negocio = QLabel(NOMBRE_NEGOCIO_POR_DEFECTO)
+        self.label_negocio.setObjectName("sidebarTitle")
+        self.label_negocio.setAlignment(Qt.AlignHCenter)
+        self.label_negocio.setWordWrap(True)
+        bloque_texto.addWidget(self.label_negocio)
+
+        self.label_usuario = QLabel()
+        self.label_usuario.setObjectName("sidebarUser")
+        self.label_usuario.setAlignment(Qt.AlignHCenter)
+        self.label_usuario.setWordWrap(True)
+        bloque_texto.addWidget(self.label_usuario)
+
+        layout_titulo.addLayout(bloque_texto)
         layout_sidebar.addWidget(contenedor_titulo)
+        self._actualizar_encabezado()
 
         self.stack = QStackedWidget()
 
@@ -131,9 +148,30 @@ class MainWindow(QMainWindow):
         primer_boton.setChecked(True)
         self.stack.setCurrentIndex(0)
 
+    def _valor_usuario(self, campo: str):
+        """Lee un campo del usuario aunque venga como objeto o como diccionario."""
+        if isinstance(self.usuario, dict):
+            return self.usuario.get(campo)
+        return getattr(self.usuario, campo, None)
+
+    def _actualizar_encabezado(self) -> None:
+        """Muestra en el sidebar el nombre del negocio y del usuario. Se vuelve
+        a llamar al navegar, así un cambio hecho en Configuración se refleja
+        sin reiniciar."""
+        config = self.config_service.obtener()
+        negocio = (config.get("nombre_negocio") or "").strip() or NOMBRE_NEGOCIO_POR_DEFECTO
+        self.label_negocio.setText(negocio)
+
+        nombre_usuario = (
+            self._valor_usuario("nombre") or self._valor_usuario("usuario") or ""
+        )
+        self.label_usuario.setText(f"👤 {nombre_usuario}" if nombre_usuario else "")
+        self.label_usuario.setVisible(bool(nombre_usuario))
+
     def _navegar(self, nombre_pagina: str) -> None:
         indice = list(self.paginas.keys()).index(nombre_pagina)
         self.stack.setCurrentIndex(indice)
+        self._actualizar_encabezado()
 
         pagina = self.paginas[nombre_pagina]
         if hasattr(pagina, "actualizar"):

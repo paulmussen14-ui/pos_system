@@ -56,14 +56,20 @@ def _anchos_columna(ancho_caracteres: int) -> dict:
 
 
 def _fila_item(cantidad, precio, subtotal, moneda, ancho_caracteres) -> str:
-    """Arma la fila 'cantidad x precio ... subtotal' con columnas fijas, sin
-    importar cuántos dígitos tenga cada número, para que quede alineada con
-    el resto de filas de la tabla de items."""
+    """Arma la fila 'cantidad x precio ... subtotal' con columnas fijas para
+    que quede alineada con el resto de filas de la tabla de items.
+
+    Si el subtotal es más ancho que su columna (ej. "S/ 1000.00" en papel de
+    58 mm), la columna crece y la de precio se reduce: NUNCA se corta el
+    monto, porque un subtotal truncado se imprimiría con un valor incorrecto.
+    """
     col = _anchos_columna(ancho_caracteres)
     cant_str = f"{cantidad:g}".ljust(col["cant"])
-    precio_str = formatear_moneda(precio, moneda).ljust(col["precio"])
-    subtotal_str = formatear_moneda(subtotal, moneda).rjust(col["subtotal"])
-    return f"{cant_str}x {precio_str}{subtotal_str}"[:ancho_caracteres]
+    subtotal_str = formatear_moneda(subtotal, moneda)
+    ancho_sub = max(col["subtotal"], len(subtotal_str))
+    ancho_precio = max(ancho_caracteres - col["cant"] - col["conector"] - ancho_sub, 1)
+    precio_str = formatear_moneda(precio, moneda)[:ancho_precio].ljust(ancho_precio)
+    return f"{cant_str}x {precio_str}{subtotal_str.rjust(ancho_sub)}"
 
 
 def _con_datos_extra(config_negocio: dict) -> dict:
@@ -205,8 +211,9 @@ def generar_texto_ticket(
         precio = linea["precio_venta_unitario"]
         subtotal = linea["subtotal"]
 
-        nombre_linea = nombre[:ancho_caracteres]
-        lineas.append(c["bold_on"] + nombre_linea + c["bold_off"] if esc_pos else nombre_linea)
+        # Nombres largos: se envuelven en varias líneas en vez de cortarse.
+        for parte in _lineas_envueltas(nombre, ancho_caracteres) or [""]:
+            lineas.append(c["bold_on"] + parte + c["bold_off"] if esc_pos else parte)
         lineas.append(_fila_item(cantidad, precio, subtotal, moneda, ancho_caracteres))
 
     lineas.append("-" * ancho_caracteres)

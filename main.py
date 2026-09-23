@@ -25,6 +25,16 @@ from utils.logger import logger
 from config import APP_ICON_PATH, APP_LOGO_PATH
 
 
+def _excepthook(tipo, valor, tb) -> None:
+    """Registra en el log cualquier excepción no controlada (por ejemplo,
+    dentro de un slot de Qt). Sin esto, en el .exe sin consola el error se
+    pierde en silencio."""
+    logger.critical("Error no controlado", exc_info=(tipo, valor, tb))
+
+
+sys.excepthook = _excepthook
+
+
 class AppController:
     """Mantiene referencias vivas a las ventanas para evitar que Python las recolecte."""
 

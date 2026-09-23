@@ -341,3 +341,7 @@ VALUES ('delete', old.id, old.nombre);
 INSERT INTO productos_fts(rowid, nombre)
 VALUES (new.id, new.nombre);
 END;
+CREATE INDEX IF NOT EXISTS idx_historial_costos_producto ON historial_costos(producto_id);
+CREATE INDEX IF NOT EXISTS idx_historial_precios_producto ON historial_precios(producto_id);
+CREATE INDEX IF NOT EXISTS idx_caja_mov_sesion ON caja_movimientos(caja_sesion_id);
+CREATE INDEX IF NOT EXISTS idx_devoluciones_venta ON devoluciones(venta_id, producto_id);

@@ -41,12 +41,11 @@ class DatabaseConnection:
         self._aplicar_esquema()
 
     def _aplicar_esquema(self) -> None:
-        """Ejecuta schema.sql (crea tablas nuevas) y luego migra columnas
-        nuevas hacia tablas que ya existían en instalaciones anteriores."""
         schema_sql = Path(SCHEMA_PATH).read_text(encoding="utf-8")
         self.conn.executescript(schema_sql)
         self.conn.commit()
-        self._migrar_columnas_faltantes(schema_sql)
+        sql_sin_comentarios = re.sub(r"--[^\n]*", "", schema_sql)
+        self._migrar_columnas_faltantes(sql_sin_comentarios)
         self._poblar_fts_si_vacio("clientes_fts", "clientes")
         self._poblar_fts_si_vacio("productos_fts", "productos")
 
@@ -103,11 +102,10 @@ class DatabaseConnection:
                     self.conn.execute(
                         f"ALTER TABLE {tabla} ADD COLUMN {nombre_columna} {definicion}"
                     )
-                except sqlite3.OperationalError:
-                    # Restricciones que ALTER TABLE no soporta agregar después
-                    # (ej. PRIMARY KEY): se ignora, porque esa columna ya
-                    # debía existir desde la creación original de la tabla.
-                    pass
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        from utils.logger import logger
+                        logger.error(f"No se pudo agregar {tabla}.{nombre_columna}: {exc}")
 
         self.conn.commit()
 

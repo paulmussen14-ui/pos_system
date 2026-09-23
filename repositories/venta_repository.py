@@ -1,6 +1,19 @@
-"""Acceso a datos de ventas y su detalle."""
+"""Acceso a datos de ventas y su detalle.
+
+Nota de rendimiento: las columnas de fecha se filtran con RANGOS
+(fecha >= X AND fecha < Y) y no con date(fecha) / strftime(..., fecha),
+porque aplicar una función a la columna impide usar idx_ventas_fecha y
+obliga a recorrer toda la tabla. Las fechas se guardan como
+'YYYY-MM-DD HH:MM:SS', así que la comparación de texto equivale a la de fechas.
+"""
 
 from database.connection import get_db
+
+# Rangos reutilizables (SQL) para "hoy" y "mes en curso", en hora local.
+_HOY_DESDE = "date('now', 'localtime')"
+_HOY_HASTA = "date('now', 'localtime', '+1 day')"
+_MES_DESDE = "date('now', 'localtime', 'start of month')"
+_MES_HASTA = "date('now', 'localtime', 'start of month', '+1 month')"
 
 
 class VentaRepository:
@@ -41,10 +54,10 @@ class VentaRepository:
         condiciones = []
         params: list = []
         if fecha_desde:
-            condiciones.append("date(v.fecha) >= date(?)")
+            condiciones.append("v.fecha >= date(?)")
             params.append(fecha_desde)
         if fecha_hasta:
-            condiciones.append("date(v.fecha) <= date(?)")
+            condiciones.append("v.fecha < date(?, '+1 day')")
             params.append(fecha_hasta)
         if condiciones:
             query += " WHERE " + " AND ".join(condiciones)
@@ -82,36 +95,38 @@ class VentaRepository:
 
     def ventas_del_dia(self) -> dict:
         cur = self.db.get_connection().execute(
-            """SELECT COALESCE(SUM(total), 0) AS total_ventas, COUNT(*) AS cantidad
+            f"""SELECT COALESCE(SUM(total), 0) AS total_ventas, COUNT(*) AS cantidad
                FROM ventas
-               WHERE date(fecha) = date('now', 'localtime') AND estado = 'completada'"""
+               WHERE fecha >= {_HOY_DESDE} AND fecha < {_HOY_HASTA}
+                 AND estado = 'completada'"""
         )
         return dict(cur.fetchone())
 
     def ventas_del_mes(self) -> dict:
         cur = self.db.get_connection().execute(
-            """SELECT COALESCE(SUM(total), 0) AS total_ventas, COUNT(*) AS cantidad
+            f"""SELECT COALESCE(SUM(total), 0) AS total_ventas, COUNT(*) AS cantidad
                FROM ventas
-               WHERE strftime('%Y-%m', fecha) = strftime('%Y-%m', 'now', 'localtime')
+               WHERE fecha >= {_MES_DESDE} AND fecha < {_MES_HASTA}
                  AND estado = 'completada'"""
         )
         return dict(cur.fetchone())
 
     def utilidad_del_dia(self) -> float:
         cur = self.db.get_connection().execute(
-            """SELECT COALESCE(SUM((vd.precio_venta_unitario - vd.costo_unitario_snapshot) * vd.cantidad), 0) AS utilidad
+            f"""SELECT COALESCE(SUM((vd.precio_venta_unitario - vd.costo_unitario_snapshot) * vd.cantidad), 0) AS utilidad
                FROM venta_detalle vd
                JOIN ventas v ON v.id = vd.venta_id
-               WHERE date(v.fecha) = date('now', 'localtime') AND v.estado = 'completada'"""
+               WHERE v.fecha >= {_HOY_DESDE} AND v.fecha < {_HOY_HASTA}
+                 AND v.estado = 'completada'"""
         )
         return cur.fetchone()["utilidad"]
 
     def utilidad_del_mes(self) -> float:
         cur = self.db.get_connection().execute(
-            """SELECT COALESCE(SUM((vd.precio_venta_unitario - vd.costo_unitario_snapshot) * vd.cantidad), 0) AS utilidad
+            f"""SELECT COALESCE(SUM((vd.precio_venta_unitario - vd.costo_unitario_snapshot) * vd.cantidad), 0) AS utilidad
                FROM venta_detalle vd
                JOIN ventas v ON v.id = vd.venta_id
-               WHERE strftime('%Y-%m', v.fecha) = strftime('%Y-%m', 'now', 'localtime')
+               WHERE v.fecha >= {_MES_DESDE} AND v.fecha < {_MES_HASTA}
                  AND v.estado = 'completada'"""
         )
         return cur.fetchone()["utilidad"]
@@ -131,7 +146,7 @@ class VentaRepository:
         cur = self.db.get_connection().execute(
             """SELECT date(fecha) AS dia, COALESCE(SUM(total), 0) AS total
                FROM ventas
-               WHERE date(fecha) >= date('now', 'localtime', ?) AND estado = 'completada'
+               WHERE fecha >= date('now', 'localtime', ?) AND estado = 'completada'
                GROUP BY date(fecha)
                ORDER BY dia ASC""",
             (f"-{n - 1} days",),
@@ -144,10 +159,10 @@ class VentaRepository:
         cur = self.db.get_connection().execute(
             """SELECT strftime('%m', fecha) AS mes, COALESCE(SUM(total), 0) AS total
                FROM ventas
-               WHERE strftime('%Y', fecha) = ? AND estado = 'completada'
+               WHERE fecha >= ? AND fecha < ? AND estado = 'completada'
                GROUP BY strftime('%m', fecha)
                ORDER BY mes ASC""",
-            (str(anio),),
+            (f"{anio:04d}-01-01", f"{anio + 1:04d}-01-01"),
         )
         return [dict(r) for r in cur.fetchall()]
 
@@ -170,11 +185,11 @@ class VentaRepository:
         """Total vendido en el mes calendario en curso, agrupado por método
         de pago. Se usa en el gráfico circular del dashboard."""
         cur = self.db.get_connection().execute(
-            """SELECT COALESCE(mp.nombre, 'Sin método') AS metodo, SUM(v.total) AS total
+            f"""SELECT COALESCE(mp.nombre, 'Sin método') AS metodo, SUM(v.total) AS total
                FROM ventas v
                LEFT JOIN metodos_pago mp ON mp.id = v.metodo_pago_id
                WHERE v.estado = 'completada'
-                 AND strftime('%Y-%m', v.fecha) = strftime('%Y-%m', 'now', 'localtime')
+                 AND v.fecha >= {_MES_DESDE} AND v.fecha < {_MES_HASTA}
                GROUP BY COALESCE(mp.nombre, 'Sin método')
                ORDER BY total DESC"""
         )

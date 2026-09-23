@@ -23,7 +23,9 @@ class VentaDetalleItem:
 
     def __post_init__(self):
         if self.cantidad_presentacion is None:
-            self.cantidad_presentacion = self.cantidad
+            self.cantidad_presentacion = (
+                self.cantidad / self.factor_unidades if self.factor_unidades else self.cantidad
+            )
 
     @property
     def subtotal(self) -> float:

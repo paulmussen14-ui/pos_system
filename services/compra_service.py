@@ -124,6 +124,7 @@ class CompraService:
         factor_unidades: float,
         cantidad_presentacion: float,
         costo_presentacion_total: float,
+        usuario_id: int | None = None,
     ) -> None:
         """Corrige una línea de una compra YA REGISTRADA (ej. se tecleó mal
         la cantidad o el costo). Revierte el efecto de la cantidad anterior
@@ -132,7 +133,12 @@ class CompraService:
         queda tras la reversión. No reconstruye retroactivamente todo el
         historial de costos posterior a esta compra; si ya se vendió stock
         de este producto después, el promedio pasa a ajustarse desde ahora
-        en adelante, no desde la fecha original de la compra."""
+        en adelante, no desde la fecha original de la compra.
+
+        Si la compra se pagó al contado y la corrección cambia su total, la
+        diferencia se registra en la caja ABIERTA actual (egreso si costó
+        más, ingreso manual si costó menos), para que el cierre de caja
+        siga cuadrando. Si no hay caja abierta, la corrección se rechaza."""
         if factor_unidades <= 0:
             raise CompraError("La equivalencia de la presentación debe ser mayor a cero.")
         if cantidad_presentacion <= 0:
@@ -144,8 +150,15 @@ class CompraService:
         if not linea_actual:
             raise CompraError("La línea de compra no existe.")
 
+        compra_id = linea_actual["compra_id"]
         producto_id = linea_actual["producto_id"]
         cantidad_anterior = linea_actual["cantidad"]
+
+        compra = self.db.get_connection().execute(
+            "SELECT pago_es_efectivo, total FROM compras WHERE id = ?", (compra_id,)
+        ).fetchone()
+        pago_es_efectivo = bool(compra and compra["pago_es_efectivo"])
+        total_anterior = compra["total"] if compra else 0.0
 
         nueva_cantidad_base = cantidad_presentacion * factor_unidades
         nuevo_costo_unitario = round(costo_presentacion_total / factor_unidades, 4)
@@ -178,12 +191,38 @@ class CompraService:
                 cur, detalle_id, nueva_cantidad_base, nuevo_costo_unitario, nuevo_subtotal,
                 presentacion_nombre, cantidad_presentacion,
             )
-            self.compra_repo.recalcular_totales_compra(cur, linea_actual["compra_id"])
+            self.compra_repo.recalcular_totales_compra(cur, compra_id)
             self.compra_repo.registrar_historial_costo(
                 cur, producto_id, nuevo_costo_unitario, nuevo_costo_promedio, detalle_id,
                 motivo="correccion_compra",
             )
             self.inventario_repo.registrar_movimiento(
                 cur, producto_id, "ajuste", nueva_cantidad_base - cantidad_anterior,
-                "compra_correccion", linea_actual["compra_id"], None,
+                "compra_correccion", compra_id, usuario_id,
             )
+
+            if pago_es_efectivo:
+                total_nuevo = cur.execute(
+                    "SELECT total FROM compras WHERE id = ?", (compra_id,)
+                ).fetchone()["total"]
+                diferencia = round(total_nuevo - total_anterior, 2)
+                if diferencia != 0:
+                    # Sistema de un solo usuario: la caja abierta es la vigente.
+                    sesion = cur.execute(
+                        "SELECT id FROM caja_sesiones WHERE estado = 'abierta' ORDER BY id DESC LIMIT 1"
+                    ).fetchone()
+                    if not sesion:
+                        raise CompraError(
+                            "Debe abrir la caja para corregir una compra pagada al contado "
+                            "(la corrección cambia el dinero que salió de la caja)."
+                        )
+                    if diferencia > 0:
+                        self.caja_repo.registrar_movimiento(
+                            cur, sesion["id"], "egreso", diferencia,
+                            f"Corrección compra #{compra_id}", compra_id,
+                        )
+                    else:
+                        self.caja_repo.registrar_movimiento(
+                            cur, sesion["id"], "ingreso_manual", -diferencia,
+                            f"Corrección compra #{compra_id}", compra_id,
+                        )

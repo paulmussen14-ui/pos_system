@@ -2,15 +2,7 @@
 
 from database.connection import get_db
 from models.caja import CajaSesion
-import sys, traceback
-from PySide6.QtWidgets import QMessageBox
 
-def _excepthook(tipo, valor, tb):
-    texto = "".join(traceback.format_exception(tipo, valor, tb))
-    print(texto, file=sys.stderr)
-    QMessageBox.critical(None, "Error", f"{tipo.__name__}: {valor}")
-
-sys.excepthook = _excepthook
 
 class CajaRepository:
 

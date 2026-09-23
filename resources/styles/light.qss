@@ -338,6 +338,8 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     width: 0px;
 }
 
+QLabel#sidebarUser { color: #64748b; font-size: 12px; }
+
 /* --- Badges de estado --- */
 QLabel.badgeOk {
     background-color: #dcfce7;

@@ -118,6 +118,16 @@ class VentaService:
         if venta["estado"] == "anulada":
             raise VentaError("La venta ya está anulada.")
 
+        # Si la venta fue en efectivo (snapshot pago_es_efectivo, no el método
+        # de pago actual), el dinero sale HOY de la caja: el egreso se registra
+        # en la sesión ABIERTA actual, no en la sesión original de la venta
+        # (que puede estar cerrada y su cierre ya calculado).
+        sesion_caja = None
+        if venta["pago_es_efectivo"]:
+            sesion_caja = self.caja_repo.obtener_sesion_abierta(usuario_id)
+            if not sesion_caja:
+                raise VentaError("Debe abrir la caja para anular una venta en efectivo.")
+
         lineas = self.venta_repo.obtener_lineas(venta_id)
 
         # Cantidad vendida por producto (una venta puede repetir un producto
@@ -146,12 +156,9 @@ class VentaService:
                     "anulacion", venta_id, usuario_id,
                 )
 
-            # Solo se revierte el dinero de caja si la venta original fue en
-            # efectivo (usamos el snapshot pago_es_efectivo, no el método de
-            # pago actual, que pudo haber cambiado de configuración después).
-            if venta["caja_sesion_id"] and venta["pago_es_efectivo"]:
+            if sesion_caja:
                 self.caja_repo.registrar_movimiento(
-                    cur, venta["caja_sesion_id"], "egreso", venta["total"],
+                    cur, sesion_caja.id, "egreso", venta["total"],
                     f"Anulación venta #{venta_id}", venta_id,
                 )
 
@@ -160,22 +167,23 @@ class VentaService:
         if cantidad <= 0:
             raise VentaError("La cantidad a devolver debe ser mayor a cero.")
 
-        venta = self.venta_repo.obtener_venta(venta_id)
-        if not venta:
-            raise VentaError("Venta no encontrada.")
-        if venta["estado"] != "completada":
-            raise VentaError("No se puede devolver productos de una venta anulada.")
-
-        vendido = sum(
-            l["cantidad"] for l in self.venta_repo.obtener_lineas(venta_id)
-            if l["producto_id"] == producto_id
-        )
-        if vendido <= 0:
-            raise VentaError("Ese producto no pertenece a la venta indicada.")
-
-        # Validacion y escritura en la MISMA transaccion: si dos devoluciones
-        # llegan seguidas, la segunda ya ve lo que devolvio la primera.
+        # Todas las validaciones y la escritura ocurren en la MISMA transaccion:
+        # si una anulación o una segunda devolución llegan seguidas, ya ven el
+        # estado real de la venta y lo devuelto.
         with self.db.transaction() as cur:
+            venta = self.venta_repo.obtener_venta(venta_id)
+            if not venta:
+                raise VentaError("Venta no encontrada.")
+            if venta["estado"] != "completada":
+                raise VentaError("No se puede devolver productos de una venta anulada.")
+
+            vendido = sum(
+                l["cantidad"] for l in self.venta_repo.obtener_lineas(venta_id)
+                if l["producto_id"] == producto_id
+            )
+            if vendido <= 0:
+                raise VentaError("Ese producto no pertenece a la venta indicada.")
+
             ya_devuelto = self.venta_repo.cantidad_devuelta(cur, venta_id, producto_id)
             disponible = round(vendido - ya_devuelto, 6)
             if cantidad > disponible:
@@ -211,6 +219,7 @@ class VentaService:
 
     def metodos_pago(self):
         return self.venta_repo.listar_metodos_pago()
+
     def cambiar_cliente(self, venta_id: int, cliente_id: int | None) -> None:
         venta = self.venta_repo.obtener_venta(venta_id)
         if not venta:
