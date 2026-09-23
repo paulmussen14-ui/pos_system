@@ -158,7 +158,9 @@ CREATE TABLE IF NOT EXISTS compra_detalle (
     producto_id INTEGER NOT NULL REFERENCES productos(id),
     cantidad REAL NOT NULL,
     costo_unitario REAL NOT NULL,
-    subtotal REAL NOT NULL
+    subtotal REAL NOT NULL,
+    presentacion_nombre TEXT NOT NULL DEFAULT 'Unidad',
+    cantidad_presentacion REAL NOT NULL DEFAULT 0
 );
 -- ------------------------------------------------------------
 -- HISTORIAL DE COSTOS (nunca se sobrescribe, solo se agrega)

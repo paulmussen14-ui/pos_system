@@ -79,6 +79,7 @@ class CompraService:
                 detalle_id = self.compra_repo.crear_linea_detalle(
                     cur, compra_id, linea.producto_id, linea.cantidad,
                     linea.costo_unitario, linea.subtotal,
+                    linea.presentacion_nombre, linea.cantidad_presentacion,
                 )
 
                 nuevo_costo_promedio = calcular_costo_promedio_ponderado(
@@ -112,3 +113,77 @@ class CompraService:
     def obtener_compra_con_lineas(self, compra_id: int) -> dict:
         lineas = self.compra_repo.obtener_lineas(compra_id)
         return {"lineas": lineas}
+
+    def sugerir_numero_documento(self) -> str:
+        return self.compra_repo.siguiente_numero_documento()
+
+    def editar_linea_compra(
+        self,
+        detalle_id: int,
+        presentacion_nombre: str,
+        factor_unidades: float,
+        cantidad_presentacion: float,
+        costo_presentacion_total: float,
+    ) -> None:
+        """Corrige una línea de una compra YA REGISTRADA (ej. se tecleó mal
+        la cantidad o el costo). Revierte el efecto de la cantidad anterior
+        sobre el stock y vuelve a aplicar la cantidad/costo corregidos como
+        una entrada nueva de costo promedio ponderado sobre el stock que
+        queda tras la reversión. No reconstruye retroactivamente todo el
+        historial de costos posterior a esta compra; si ya se vendió stock
+        de este producto después, el promedio pasa a ajustarse desde ahora
+        en adelante, no desde la fecha original de la compra."""
+        if factor_unidades <= 0:
+            raise CompraError("La equivalencia de la presentación debe ser mayor a cero.")
+        if cantidad_presentacion <= 0:
+            raise CompraError("La cantidad debe ser mayor a cero.")
+        if costo_presentacion_total < 0:
+            raise CompraError("El costo no puede ser negativo.")
+
+        linea_actual = self.compra_repo.obtener_linea_por_id(detalle_id)
+        if not linea_actual:
+            raise CompraError("La línea de compra no existe.")
+
+        producto_id = linea_actual["producto_id"]
+        cantidad_anterior = linea_actual["cantidad"]
+
+        nueva_cantidad_base = cantidad_presentacion * factor_unidades
+        nuevo_costo_unitario = round(costo_presentacion_total / factor_unidades, 4)
+        nuevo_subtotal = round(nueva_cantidad_base * nuevo_costo_unitario, 2)
+
+        with self.db.transaction() as cur:
+            fila = cur.execute(
+                "SELECT stock_actual, costo_promedio_actual FROM productos WHERE id = ?",
+                (producto_id,),
+            ).fetchone()
+            stock_revertido = fila["stock_actual"] - cantidad_anterior
+
+            if stock_revertido < 0:
+                raise CompraError(
+                    "No se puede editar esta línea: parte de esa mercadería ya se vendió "
+                    "o se ajustó después, y corregirla dejaría el stock en negativo."
+                )
+
+            nuevo_costo_promedio = calcular_costo_promedio_ponderado(
+                stock_revertido, fila["costo_promedio_actual"], nueva_cantidad_base, nuevo_costo_unitario,
+            )
+            nuevo_stock = stock_revertido + nueva_cantidad_base
+
+            cur.execute(
+                "UPDATE productos SET stock_actual = ?, costo_promedio_actual = ? WHERE id = ?",
+                (nuevo_stock, nuevo_costo_promedio, producto_id),
+            )
+
+            self.compra_repo.actualizar_linea(
+                cur, detalle_id, nueva_cantidad_base, nuevo_costo_unitario, nuevo_subtotal,
+                presentacion_nombre, cantidad_presentacion,
+            )
+            self.compra_repo.recalcular_totales_compra(cur, linea_actual["compra_id"])
+            self.compra_repo.registrar_historial_costo(
+                cur, producto_id, nuevo_costo_unitario, nuevo_costo_promedio, detalle_id,
+                motivo="correccion_compra",
+            )
+            self.inventario_repo.registrar_movimiento(
+                cur, producto_id, "ajuste", nueva_cantidad_base - cantidad_anterior,
+                "compra_correccion", linea_actual["compra_id"], None,
+            )
