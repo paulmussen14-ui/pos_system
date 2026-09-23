@@ -47,6 +47,30 @@ class DatabaseConnection:
         self.conn.executescript(schema_sql)
         self.conn.commit()
         self._migrar_columnas_faltantes(schema_sql)
+        self._poblar_fts_si_vacio("clientes_fts", "clientes")
+        self._poblar_fts_si_vacio("productos_fts", "productos")
+
+    def _poblar_fts_si_vacio(self, tabla_fts: str, tabla_origen: str) -> None:
+        """Puebla la tabla FTS solo la primera vez (cuando está vacía).
+
+        El CREATE VIRTUAL TABLE en schema.sql se repite en cada arranque
+        (es IF NOT EXISTS), pero el poblado de datos no puede ir ahí:
+        como schema.sql se ejecuta siempre, un INSERT masivo ahí
+        duplicaría todas las filas en cada arranque. Aquí se hace una
+        sola vez -- en arranques posteriores los triggers AFTER
+        INSERT/UPDATE/DELETE ya mantienen la tabla FTS sincronizada,
+        así que si ya tiene datos no se vuelve a insertar nada.
+
+        Esto también resuelve la migración de instalaciones existentes:
+        la primera vez que abren la nueva versión, la tabla FTS existe
+        pero está vacía, así que se puebla sola desde la tabla original.
+        """
+        cur = self.conn.execute(f"SELECT COUNT(*) AS total FROM {tabla_fts}")
+        if cur.fetchone()["total"] == 0:
+            self.conn.execute(
+                f"INSERT INTO {tabla_fts}(rowid, nombre) SELECT id, nombre FROM {tabla_origen}"
+            )
+            self.conn.commit()
 
     def _migrar_columnas_faltantes(self, schema_sql: str) -> None:
         """

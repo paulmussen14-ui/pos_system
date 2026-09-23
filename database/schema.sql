@@ -162,6 +162,8 @@ CREATE TABLE IF NOT EXISTS compra_detalle (
     presentacion_nombre TEXT NOT NULL DEFAULT 'Unidad',
     cantidad_presentacion REAL NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_compra_detalle_compra ON compra_detalle(compra_id);
+CREATE INDEX IF NOT EXISTS idx_compra_detalle_producto ON compra_detalle(producto_id);
 -- ------------------------------------------------------------
 -- HISTORIAL DE COSTOS (nunca se sobrescribe, solo se agrega)
 -- ------------------------------------------------------------
@@ -220,6 +222,8 @@ CREATE TABLE IF NOT EXISTS venta_detalle (
     costo_unitario_snapshot REAL NOT NULL,
     subtotal REAL NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_venta_detalle_venta ON venta_detalle(venta_id);
+CREATE INDEX IF NOT EXISTS idx_venta_detalle_producto ON venta_detalle(producto_id);
 -- ------------------------------------------------------------
 -- DEVOLUCIONES
 -- ------------------------------------------------------------
@@ -248,6 +252,7 @@ CREATE TABLE IF NOT EXISTS inventario_movimientos (
     usuario_id INTEGER REFERENCES usuarios(id)
 );
 CREATE INDEX IF NOT EXISTS idx_inv_mov_producto ON inventario_movimientos(producto_id);
+CREATE INDEX IF NOT EXISTS idx_inv_mov_referencia ON inventario_movimientos(referencia_tipo, referencia_id);
 -- ------------------------------------------------------------
 -- CAJA_MOVIMIENTOS
 -- ------------------------------------------------------------
@@ -273,3 +278,66 @@ CREATE TABLE IF NOT EXISTS configuracion_impresion (
     nombre_impresora TEXT,
     activo INTEGER NOT NULL DEFAULT 0
 );
+-- ============================================================
+-- BÚSQUEDA DE TEXTO COMPLETO (FTS5)
+-- ============================================================
+-- ------------------------------------------------------------
+-- CLIENTES FTS
+-- ------------------------------------------------------------
+CREATE VIRTUAL TABLE IF NOT EXISTS clientes_fts USING fts5(
+    nombre,
+    content = 'clientes',
+    content_rowid = 'id'
+);
+-- Mantener clientes_fts sincronizada al insertar
+CREATE TRIGGER IF NOT EXISTS clientes_ai
+AFTER
+INSERT ON clientes BEGIN
+INSERT INTO clientes_fts(rowid, nombre)
+VALUES (new.id, new.nombre);
+END;
+-- Mantener clientes_fts sincronizada al eliminar
+CREATE TRIGGER IF NOT EXISTS clientes_ad
+AFTER DELETE ON clientes BEGIN
+INSERT INTO clientes_fts(clientes_fts, rowid, nombre)
+VALUES ('delete', old.id, old.nombre);
+END;
+-- Mantener clientes_fts sincronizada al actualizar
+CREATE TRIGGER IF NOT EXISTS clientes_au
+AFTER
+UPDATE OF nombre ON clientes BEGIN
+INSERT INTO clientes_fts(clientes_fts, rowid, nombre)
+VALUES ('delete', old.id, old.nombre);
+INSERT INTO clientes_fts(rowid, nombre)
+VALUES (new.id, new.nombre);
+END;
+-- ------------------------------------------------------------
+-- PRODUCTOS FTS
+-- ------------------------------------------------------------
+CREATE VIRTUAL TABLE IF NOT EXISTS productos_fts USING fts5(
+    nombre,
+    content = 'productos',
+    content_rowid = 'id'
+);
+-- Mantener productos_fts sincronizada al insertar
+CREATE TRIGGER IF NOT EXISTS productos_ai
+AFTER
+INSERT ON productos BEGIN
+INSERT INTO productos_fts(rowid, nombre)
+VALUES (new.id, new.nombre);
+END;
+-- Mantener productos_fts sincronizada al eliminar
+CREATE TRIGGER IF NOT EXISTS productos_ad
+AFTER DELETE ON productos BEGIN
+INSERT INTO productos_fts(productos_fts, rowid, nombre)
+VALUES ('delete', old.id, old.nombre);
+END;
+-- Mantener productos_fts sincronizada al actualizar
+CREATE TRIGGER IF NOT EXISTS productos_au
+AFTER
+UPDATE OF nombre ON productos BEGIN
+INSERT INTO productos_fts(productos_fts, rowid, nombre)
+VALUES ('delete', old.id, old.nombre);
+INSERT INTO productos_fts(rowid, nombre)
+VALUES (new.id, new.nombre);
+END;

@@ -10,12 +10,24 @@ class ClienteRepository:
         self.db = get_db()
 
     def listar(self, texto_busqueda: str = "") -> list[Cliente]:
-        query = "SELECT * FROM clientes"
-        params: list = []
+        texto_busqueda = texto_busqueda.strip()
         if texto_busqueda:
-            query += " WHERE nombre LIKE ?"
-            params.append(f"%{texto_busqueda}%")
-        query += " ORDER BY nombre ASC"
+            # FTS5 MATCH usa el índice invertido, a diferencia de
+            # LIKE '%texto%' que fuerza un escaneo completo de la tabla.
+            # Se envuelve en comillas + "*" para hacer match por prefijo
+            # de palabra (ej. "gase" encuentra "Gaseosa Inca Kola").
+            match_expr = f'"{texto_busqueda.replace(chr(34), chr(34) * 2)}"*'
+            query = """
+                SELECT c.* FROM clientes c
+                JOIN clientes_fts fts ON fts.rowid = c.id
+                WHERE clientes_fts MATCH ?
+                ORDER BY c.nombre ASC
+            """
+            params = [match_expr]
+        else:
+            query = "SELECT * FROM clientes ORDER BY nombre ASC"
+            params = []
+
         cur = self.db.get_connection().execute(query, params)
         return [Cliente.from_row(r) for r in cur.fetchall()]
 
