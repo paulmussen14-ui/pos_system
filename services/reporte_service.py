@@ -1,5 +1,7 @@
 """Lógica de agregación de datos para el dashboard y la sección de reportes."""
 
+from datetime import date
+
 from database.connection import get_db
 from repositories.venta_repository import VentaRepository
 from repositories.compra_repository import CompraRepository
@@ -24,7 +26,10 @@ class ReporteService:
         stock_bajo = self.producto_repo.listar_stock_bajo()
         agotados = self.producto_repo.listar_agotados()
         ultimas_ventas = self.venta_repo.ultimas_ventas(10)
-        ventas_7_dias = self.venta_repo.ventas_ultimos_n_dias(7)
+        ventas_por_mes = self._rellenar_meses_sin_ventas(
+            self.venta_repo.ventas_por_mes_del_anio(date.today().year)
+        )
+        ventas_metodo_pago_mes = self.venta_repo.ventas_por_metodo_pago_mes()
 
         ventas_mes = self.venta_repo.ventas_del_mes()
         utilidad_mes = self.venta_repo.utilidad_del_mes()
@@ -43,13 +48,25 @@ class ReporteService:
             "stock_bajo": stock_bajo,
             "agotados": agotados,
             "ultimas_ventas": ultimas_ventas,
-            "ventas_7_dias": ventas_7_dias,
+            "ventas_por_mes": ventas_por_mes,
+            "ventas_metodo_pago_mes": ventas_metodo_pago_mes,
             "ventas_del_mes_total": ventas_mes["total_ventas"],
             "ventas_del_mes_cantidad": ventas_mes["cantidad"],
             "utilidad_del_mes": utilidad_mes,
             "compras_del_mes_total": compras_mes["total_compras"],
             "ticket_promedio_mes": ticket_promedio_mes,
         }
+
+    @staticmethod
+    def _rellenar_meses_sin_ventas(filas: list[dict]) -> list[dict]:
+        """`ventas_por_mes_del_anio` solo trae los meses con al menos una
+        venta. Para que el gráfico muestre los 12 meses del año, se
+        completan los que no tuvieron ventas con total 0."""
+        totales_por_mes = {fila["mes"]: fila["total"] for fila in filas}
+        return [
+            {"mes": f"{i:02d}", "total": totales_por_mes.get(f"{i:02d}", 0.0)}
+            for i in range(1, 13)
+        ]
 
     def reporte_ventas(self, fecha_desde: str = "", fecha_hasta: str = "") -> list[dict]:
         return self.venta_repo.listar_ventas(fecha_desde, fecha_hasta)

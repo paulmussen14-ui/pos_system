@@ -1,15 +1,21 @@
 """Página de Inicio / Dashboard: resumen del negocio."""
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
-    QTableWidgetItem, QHeaderView, QScrollArea
-)
+from datetime import date
+
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea
 from PySide6.QtCore import Qt
 
 from services.reporte_service import ReporteService
 from services.configuracion_service import ConfiguracionService
 from ui.widgets.metric_card import MetricCard
+from ui.widgets.line_chart import LineChartWidget
+from ui.widgets.donut_chart import DonutChartWidget
 from utils.validators import formatear_moneda
+
+_MESES_CORTO = [
+    "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+    "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+]
 
 
 class DashboardPage(QWidget):
@@ -74,18 +80,19 @@ class DashboardPage(QWidget):
         fila_alertas.addStretch()
         layout.addLayout(fila_alertas)
 
-        # Tabla de últimas ventas
-        subtitulo_ventas = QLabel("Últimas ventas")
-        subtitulo_ventas.setStyleSheet("font-size: 16px; font-weight: 600; margin-top: 8px;")
-        layout.addWidget(subtitulo_ventas)
+        # Gráficos: tendencia de ventas (línea) + desglose por método de
+        # pago (circular), en vez de la tabla de últimas ventas.
+        subtitulo_graficos = QLabel("Tendencia")
+        subtitulo_graficos.setStyleSheet("font-size: 14px; font-weight: 600; color: #6b7280; margin-top: 4px;")
+        layout.addWidget(subtitulo_graficos)
 
-        self.tabla_ultimas_ventas = QTableWidget(0, 4)
-        self.tabla_ultimas_ventas.setHorizontalHeaderLabels(["#", "Fecha", "Cliente", "Total"])
-        self.tabla_ultimas_ventas.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.tabla_ultimas_ventas.verticalHeader().setVisible(False)
-        self.tabla_ultimas_ventas.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tabla_ultimas_ventas.setMaximumHeight(260)
-        layout.addWidget(self.tabla_ultimas_ventas)
+        fila_graficos = QHBoxLayout()
+        fila_graficos.setSpacing(16)
+        self.chart_ventas_anio = LineChartWidget(f"Ventas por mes ({date.today().year})")
+        self.chart_metodo_pago = DonutChartWidget("Ventas por método de pago (este mes)")
+        fila_graficos.addWidget(self.chart_ventas_anio, 2)
+        fila_graficos.addWidget(self.chart_metodo_pago, 1)
+        layout.addLayout(fila_graficos)
 
         layout.addStretch()
         scroll.setWidget(contenido)
@@ -97,6 +104,7 @@ class DashboardPage(QWidget):
     def actualizar(self) -> None:
         config = self.config_service.obtener()
         moneda = config.get("moneda", "S/")
+        oscuro = config.get("tema") == "oscuro"
         resumen = self.reporte_service.resumen_dashboard(self.usuario.id)
 
         self.card_ventas.actualizar_valor(formatear_moneda(resumen["ventas_del_dia_total"], moneda))
@@ -124,10 +132,13 @@ class DashboardPage(QWidget):
             lbl.style().unpolish(lbl)
             lbl.style().polish(lbl)
 
-        ventas = resumen["ultimas_ventas"]
-        self.tabla_ultimas_ventas.setRowCount(len(ventas))
-        for fila, venta in enumerate(ventas):
-            self.tabla_ultimas_ventas.setItem(fila, 0, QTableWidgetItem(str(venta["id"])))
-            self.tabla_ultimas_ventas.setItem(fila, 1, QTableWidgetItem(str(venta["fecha"])))
-            self.tabla_ultimas_ventas.setItem(fila, 2, QTableWidgetItem(venta.get("cliente_nombre") or "Sin cliente"))
-            self.tabla_ultimas_ventas.setItem(fila, 3, QTableWidgetItem(formatear_moneda(venta["total"], moneda)))
+        self.chart_ventas_anio.set_modo_oscuro(oscuro)
+        puntos = [
+            (_MESES_CORTO[int(fila["mes"]) - 1], fila["total"])
+            for fila in resumen["ventas_por_mes"]
+        ]
+        self.chart_ventas_anio.set_datos(puntos)
+
+        self.chart_metodo_pago.set_modo_oscuro(oscuro)
+        segmentos = [(fila["metodo"], fila["total"]) for fila in resumen["ventas_metodo_pago_mes"]]
+        self.chart_metodo_pago.set_datos(segmentos, moneda)

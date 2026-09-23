@@ -138,6 +138,19 @@ class VentaRepository:
         )
         return [dict(r) for r in cur.fetchall()]
 
+    def ventas_por_mes_del_anio(self, anio: int) -> list[dict]:
+        """Total vendido por mes calendario del año indicado. Se usa en el
+        gráfico de línea del dashboard."""
+        cur = self.db.get_connection().execute(
+            """SELECT strftime('%m', fecha) AS mes, COALESCE(SUM(total), 0) AS total
+               FROM ventas
+               WHERE strftime('%Y', fecha) = ? AND estado = 'completada'
+               GROUP BY strftime('%m', fecha)
+               ORDER BY mes ASC""",
+            (str(anio),),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
     def productos_mas_vendidos(self, limite: int = 10) -> list[dict]:
         cur = self.db.get_connection().execute(
             """SELECT p.nombre, SUM(vd.cantidad) AS cantidad_total,
@@ -150,6 +163,20 @@ class VentaRepository:
                ORDER BY cantidad_total DESC
                LIMIT ?""",
             (limite,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    def ventas_por_metodo_pago_mes(self) -> list[dict]:
+        """Total vendido en el mes calendario en curso, agrupado por método
+        de pago. Se usa en el gráfico circular del dashboard."""
+        cur = self.db.get_connection().execute(
+            """SELECT COALESCE(mp.nombre, 'Sin método') AS metodo, SUM(v.total) AS total
+               FROM ventas v
+               LEFT JOIN metodos_pago mp ON mp.id = v.metodo_pago_id
+               WHERE v.estado = 'completada'
+                 AND strftime('%Y-%m', v.fecha) = strftime('%Y-%m', 'now', 'localtime')
+               GROUP BY COALESCE(mp.nombre, 'Sin método')
+               ORDER BY total DESC"""
         )
         return [dict(r) for r in cur.fetchall()]
 
