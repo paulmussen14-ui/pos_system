@@ -32,7 +32,8 @@ class VentaRepository:
 
     def listar_ventas(self, fecha_desde: str = "", fecha_hasta: str = "", limite: int = 500) -> list[dict]:
         query = """
-            SELECT v.*, c.nombre AS cliente_nombre, mp.nombre AS metodo_pago_nombre
+            SELECT v.*, c.nombre AS cliente_nombre, c.direccion AS cliente_direccion,
+                   mp.nombre AS metodo_pago_nombre
             FROM ventas v
             LEFT JOIN clientes c ON c.id = v.cliente_id
             LEFT JOIN metodos_pago mp ON mp.id = v.metodo_pago_id
@@ -55,7 +56,8 @@ class VentaRepository:
 
     def obtener_venta(self, venta_id: int) -> dict | None:
         cur = self.db.get_connection().execute(
-            """SELECT v.*, c.nombre AS cliente_nombre, mp.nombre AS metodo_pago_nombre
+            """SELECT v.*, c.nombre AS cliente_nombre, c.direccion AS cliente_direccion,
+                      mp.nombre AS metodo_pago_nombre
                FROM ventas v
                LEFT JOIN clientes c ON c.id = v.cliente_id
                LEFT JOIN metodos_pago mp ON mp.id = v.metodo_pago_id
@@ -176,5 +178,6 @@ class VentaRepository:
                 (venta_id, producto_id, cantidad, motivo, usuario_id),
             )
             return cur.lastrowid
+
     def actualizar_cliente(self, cursor, venta_id: int, cliente_id: int | None) -> None:
         cursor.execute("UPDATE ventas SET cliente_id = ? WHERE id = ?", (cliente_id, venta_id))

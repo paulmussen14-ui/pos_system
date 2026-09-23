@@ -3,6 +3,13 @@
 La consulta a la base de datos se hace en un hilo aparte (Worker), igual que
 en ventas_page.py, para que la ventana no se congele con muchos productos.
 
+Paginación: en vez de traer toda la tabla de una vez, cada consulta trae
+como máximo TAMANO_PAGINA productos. Al abrir la página o buscar, se carga
+el primer lote; si hay más resultados, aparece el botón "Cargar más" para
+traer el siguiente lote sin recargar los que ya están en pantalla. Esto es
+lo que evita que la app se cuelgue o tarde en poblar la tabla cuando el
+catálogo tiene miles de productos.
+
 Reglas para que los cambios NO oculten datos:
 - Mientras carga, la tabla conserva las filas anteriores (no se vacía).
 - Si la consulta falla, se muestra un mensaje rojo y se conservan las filas.
@@ -23,6 +30,8 @@ from utils.validators import formatear_moneda
 from utils.worker import Worker
 from utils.logger import logger
 
+TAMANO_PAGINA = 200
+
 
 class ProductosPage(QWidget):
 
@@ -37,6 +46,11 @@ class ProductosPage(QWidget):
         # Cada consulta lleva un número. Solo se aplica la respuesta de la
         # consulta con el número más alto (la más reciente).
         self._numero_consulta = 0
+
+        # Productos ya cargados en la tabla (se acumulan al usar "Cargar
+        # más"; se reinician al abrir la página o al cambiar la búsqueda).
+        self._items: list = []
+        self._hay_mas = False
 
         # Debounce: espera 300ms sin escribir antes de consultar.
         self._timer_busqueda = QTimer(self)
@@ -83,6 +97,12 @@ class ProductosPage(QWidget):
         self.tabla.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.tabla)
 
+        self.btn_cargar_mas = QPushButton("Cargar más")
+        self.btn_cargar_mas.setProperty("class", "secondary")
+        self.btn_cargar_mas.clicked.connect(self._cargar_mas)
+        self.btn_cargar_mas.setVisible(False)
+        layout.addWidget(self.btn_cargar_mas)
+
         # Línea de estado: cargando / cuántos productos se muestran / error.
         self.label_estado = QLabel("")
         self.label_estado.setStyleSheet("color: #6b7280; font-size: 12px;")
@@ -95,16 +115,34 @@ class ProductosPage(QWidget):
     # ------------------------------------------------------ Carga ----
 
     def actualizar(self) -> None:
+        """Carga inicial o nueva búsqueda: reinicia la paginación desde cero."""
+        self._items = []
+        self._hay_mas = False
+        self.btn_cargar_mas.setVisible(False)
+        self._cargar(modo="reset")
+
+    def _cargar_mas(self) -> None:
+        self._cargar(modo="append")
+
+    def _cargar(self, modo: str) -> None:
         self._numero_consulta += 1
         numero = self._numero_consulta
         texto = self.input_busqueda.text()
+        offset = 0 if modo == "reset" else len(self._items)
 
-        self.label_estado.setStyleSheet("color: #6b7280; font-size: 12px;")
-        self.label_estado.setText("Cargando...")
+        self.btn_cargar_mas.setEnabled(False)
+        if modo == "reset":
+            self.label_estado.setStyleSheet("color: #6b7280; font-size: 12px;")
+            self.label_estado.setText("Cargando...")
+        else:
+            self.label_estado.setText(f"Cargando más... (mostrando {len(self._items)})")
 
-        worker = Worker(self.producto_service.listar, texto)
+        # Se pide un producto extra (TAMANO_PAGINA + 1) solo para saber si
+        # hay más resultados después de este lote, sin necesitar un COUNT
+        # aparte; ese producto de más nunca se muestra en la tabla.
+        worker = Worker(self.producto_service.listar, texto, TAMANO_PAGINA + 1, offset)
         worker.signals.finished.connect(
-            lambda productos, n=numero, t=texto: self._on_productos_listos(n, t, productos)
+            lambda productos, n=numero, t=texto, m=modo: self._on_productos_listos(n, t, productos, m)
         )
         worker.signals.error.connect(
             lambda mensaje, n=numero: self._on_error_carga(n, mensaje)
@@ -116,30 +154,48 @@ class ProductosPage(QWidget):
             return
         logger.error("Error cargando productos: %s", mensaje)
         # No se toca la tabla: se conservan las filas que ya estaban.
+        self.btn_cargar_mas.setEnabled(True)
         self.label_estado.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 600;")
         self.label_estado.setText(
             "No se pudo cargar la lista de productos. "
             "Los datos mostrados pueden estar desactualizados."
         )
 
-    def _on_productos_listos(self, numero: int, texto: str, productos) -> None:
+    def _on_productos_listos(self, numero: int, texto: str, productos, modo: str) -> None:
         if numero != self._numero_consulta:
             return
+
+        self._hay_mas = len(productos) > TAMANO_PAGINA
+        nuevos = productos[:TAMANO_PAGINA]
+
+        if modo == "reset":
+            self._items = nuevos
+            fila_inicial = 0
+        else:
+            fila_inicial = len(self._items)
+            self._items.extend(nuevos)
 
         moneda = self.config_service.obtener().get("moneda", "S/")
 
         # Se apaga el repintado mientras se llenan las filas para que
-        # la tabla no se redibuje en cada celda.
+        # la tabla no se redibuje en cada celda. En "Cargar más" solo se
+        # llenan las filas nuevas; las que ya estaban no se vuelven a tocar.
         self.tabla.setUpdatesEnabled(False)
         try:
-            self.tabla.setRowCount(len(productos))
-            for fila, p in enumerate(productos):
-                self._llenar_fila(fila, p, moneda)
+            self.tabla.setRowCount(len(self._items))
+            for i, p in enumerate(nuevos):
+                self._llenar_fila(fila_inicial + i, p, moneda)
         finally:
             self.tabla.setUpdatesEnabled(True)
 
-        if len(productos) > 0:
-            self.label_estado.setText(f"Mostrando {len(productos)} producto(s)")
+        self.btn_cargar_mas.setVisible(self._hay_mas)
+        self.btn_cargar_mas.setEnabled(True)
+
+        if len(self._items) > 0:
+            texto_estado = f"Mostrando {len(self._items)} producto(s)"
+            if self._hay_mas:
+                texto_estado += " — hay más resultados, usa \"Cargar más\""
+            self.label_estado.setText(texto_estado)
         elif texto.strip():
             self.label_estado.setText(f"Sin resultados para '{texto}'")
         else:

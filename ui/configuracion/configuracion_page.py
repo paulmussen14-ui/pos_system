@@ -4,6 +4,8 @@ from pathlib import Path
 import os
 import shutil
 import sys
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QDoubleSpinBox, QTabWidget, QMessageBox,
@@ -15,6 +17,8 @@ from services.auth_service import AuthService, AuthError
 from utils.backup_manager import crear_backup, listar_backups, restaurar_backup
 from printing.ticket_printer import listar_impresoras_disponibles
 from ui.configuracion.ticket_extras_dialog import TicketExtrasDialog
+
+TAMANO_PREVIEW = 64
 
 
 class ConfiguracionPage(QWidget):
@@ -71,9 +75,27 @@ class ConfiguracionPage(QWidget):
         form.addRow("Pie de ticket:", self.input_ticket_pie)
         form.addRow("Tema:", self.combo_tema)
 
+        self.preview_logo = self._crear_preview_vacio()
         btn_logo = QPushButton("Cambiar logo...")
         btn_logo.clicked.connect(self._seleccionar_logo)
-        form.addRow("Logo:", btn_logo)
+        fila_logo = QHBoxLayout()
+        fila_logo.addWidget(self.preview_logo)
+        fila_logo.addWidget(btn_logo)
+        fila_logo.addStretch()
+        form.addRow("Logo:", fila_logo)
+
+        self.preview_qr_yape = self._crear_preview_vacio()
+        btn_qr_yape = QPushButton("Cambiar QR de Yape...")
+        btn_qr_yape.setToolTip(
+            "Imagen del QR de Yape que se imprime en el ticket, debajo del "
+            "número de Yape (si la impresora lo soporta)."
+        )
+        btn_qr_yape.clicked.connect(self._seleccionar_qr_yape)
+        fila_qr = QHBoxLayout()
+        fila_qr.addWidget(self.preview_qr_yape)
+        fila_qr.addWidget(btn_qr_yape)
+        fila_qr.addStretch()
+        form.addRow("QR de Yape:", fila_qr)
 
         btn_guardar = QPushButton("Guardar cambios")
         btn_guardar.clicked.connect(self._guardar_negocio)
@@ -211,6 +233,9 @@ class ConfiguracionPage(QWidget):
         if idx_tema >= 0:
             self.combo_tema.setCurrentIndex(idx_tema)
 
+        self._actualizar_preview(self.preview_logo, config.get("logo_path"))
+        self._actualizar_preview(self.preview_qr_yape, config.get("qr_yape_path"))
+
         config_impresion = self.config_service.obtener_config_impresion()
         idx_tipo = self.combo_tipo_impresora.findText(config_impresion.get("tipo_impresora", "termica_58mm"))
         if idx_tipo >= 0:
@@ -234,6 +259,40 @@ class ConfiguracionPage(QWidget):
         for backup in listar_backups():
             self.lista_backups.addItem(backup.name)
 
+    # ---------------------------------------------------- Vista previa ----
+    def _crear_preview_vacio(self) -> QLabel:
+        preview = QLabel()
+        preview.setFixedSize(TAMANO_PREVIEW, TAMANO_PREVIEW)
+        preview.setAlignment(Qt.AlignCenter)
+        preview.setStyleSheet(
+            "border: 1px solid #d1d5db; border-radius: 4px; color: #9ca3af; font-size: 10px;"
+        )
+        preview.setText("Sin\nimagen")
+        return preview
+
+    def _actualizar_preview(self, preview: QLabel, ruta: str | None) -> None:
+        """
+        Muestra la miniatura de ruta en preview, o "Sin imagen"/"No se
+        encuentra" según corresponda. Así el usuario ve de un vistazo si el
+        logo o el QR están bien cargados, sin tener que imprimir un ticket
+        para descubrir que la imagen se perdió.
+        """
+        if not ruta:
+            preview.setPixmap(QPixmap())
+            preview.setText("Sin\nimagen")
+            return
+
+        pixmap = QPixmap(ruta)
+        if pixmap.isNull() or not Path(ruta).exists():
+            preview.setPixmap(QPixmap())
+            preview.setText("No se\nencuentra")
+            return
+
+        preview.setText("")
+        preview.setPixmap(
+            pixmap.scaled(TAMANO_PREVIEW, TAMANO_PREVIEW, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
+
     # -------------------------------------------------------- Acciones ----
     def _abrir_datos_ticket(self) -> None:
         dialogo = TicketExtrasDialog(parent=self)
@@ -241,9 +300,27 @@ class ConfiguracionPage(QWidget):
 
     def _seleccionar_logo(self) -> None:
         ruta, _ = QFileDialog.getOpenFileName(self, "Seleccionar logo", "", "Imágenes (*.png *.jpg *.jpeg)")
-        if ruta:
+        if not ruta:
+            return
+        try:
             self.config_service.actualizar_logo(ruta)
-            QMessageBox.information(self, "Logo actualizado", "El logo se actualizó correctamente.")
+        except ValueError as e:
+            QMessageBox.warning(self, "No se pudo actualizar el logo", str(e))
+            return
+        self._actualizar_preview(self.preview_logo, self.config_service.obtener().get("logo_path"))
+        QMessageBox.information(self, "Logo actualizado", "El logo se actualizó correctamente.")
+
+    def _seleccionar_qr_yape(self) -> None:
+        ruta, _ = QFileDialog.getOpenFileName(self, "Seleccionar QR de Yape", "", "Imágenes (*.png *.jpg *.jpeg)")
+        if not ruta:
+            return
+        try:
+            self.config_service.actualizar_qr_yape(ruta)
+        except ValueError as e:
+            QMessageBox.warning(self, "No se pudo actualizar el QR", str(e))
+            return
+        self._actualizar_preview(self.preview_qr_yape, self.config_service.obtener().get("qr_yape_path"))
+        QMessageBox.information(self, "QR actualizado", "El QR de Yape se actualizó correctamente.")
 
     def _guardar_negocio(self) -> None:
         self.config_service.actualizar(

@@ -3,6 +3,11 @@
 La lista se carga en un hilo aparte (Worker) para no congelar la ventana.
 Los cambios no ocultan datos: se conservan las filas anteriores mientras
 carga o si hay un error, y una etiqueta indica cuántos clientes se muestran.
+
+Paginación: igual que en Productos, cada consulta trae como máximo
+TAMANO_PAGINA clientes. Al abrir la página o buscar se carga el primer
+lote; si hay más resultados aparece "Cargar más" para traer el siguiente
+lote sin recargar los que ya están en pantalla.
 """
 
 from datetime import datetime
@@ -22,6 +27,8 @@ from ui.widgets.ticket_preview_dialog import TicketPreviewDialog
 from utils.validators import formatear_moneda
 from utils.worker import Worker
 from utils.logger import logger
+
+TAMANO_PAGINA = 200
 
 # Mismo estilo de tabla usado en Ventas y Compras, para mantener
 # consistencia visual (encabezados con separación) en toda la app.
@@ -134,6 +141,11 @@ class ClientesPage(QWidget):
         # consulta con el número más alto (la más reciente).
         self._numero_consulta = 0
 
+        # Clientes ya cargados en la tabla (se acumulan al usar "Cargar
+        # más"; se reinician al abrir la página o al cambiar la búsqueda).
+        self._items: list = []
+        self._hay_mas = False
+
         # Debounce: espera 300ms sin escribir antes de consultar.
         self._timer_busqueda = QTimer(self)
         self._timer_busqueda.setSingleShot(True)
@@ -179,6 +191,12 @@ class ClientesPage(QWidget):
         self.tabla.setStyleSheet(ESTILO_TABLA)
         layout.addWidget(self.tabla)
 
+        self.btn_cargar_mas = QPushButton("Cargar más")
+        self.btn_cargar_mas.setProperty("class", "secondary")
+        self.btn_cargar_mas.clicked.connect(self._cargar_mas)
+        self.btn_cargar_mas.setVisible(False)
+        layout.addWidget(self.btn_cargar_mas)
+
         # Línea de estado: cargando / cuántos clientes se muestran / error.
         self.label_estado = QLabel("")
         self.label_estado.setStyleSheet("color: #6b7280; font-size: 12px;")
@@ -191,16 +209,34 @@ class ClientesPage(QWidget):
     # ------------------------------------------------------ Carga ----
 
     def actualizar(self) -> None:
+        """Carga inicial o nueva búsqueda: reinicia la paginación desde cero."""
+        self._items = []
+        self._hay_mas = False
+        self.btn_cargar_mas.setVisible(False)
+        self._cargar(modo="reset")
+
+    def _cargar_mas(self) -> None:
+        self._cargar(modo="append")
+
+    def _cargar(self, modo: str) -> None:
         self._numero_consulta += 1
         numero = self._numero_consulta
         texto = self.input_busqueda.text()
+        offset = 0 if modo == "reset" else len(self._items)
 
-        self.label_estado.setStyleSheet("color: #6b7280; font-size: 12px;")
-        self.label_estado.setText("Cargando...")
+        self.btn_cargar_mas.setEnabled(False)
+        if modo == "reset":
+            self.label_estado.setStyleSheet("color: #6b7280; font-size: 12px;")
+            self.label_estado.setText("Cargando...")
+        else:
+            self.label_estado.setText(f"Cargando más... (mostrando {len(self._items)})")
 
-        worker = Worker(self.cliente_service.listar, texto)
+        # Se pide un cliente extra (TAMANO_PAGINA + 1) solo para saber si hay
+        # más resultados después de este lote, sin necesitar un COUNT aparte;
+        # ese cliente de más nunca se muestra en la tabla.
+        worker = Worker(self.cliente_service.listar, texto, TAMANO_PAGINA + 1, offset)
         worker.signals.finished.connect(
-            lambda clientes, n=numero, t=texto: self._on_clientes_listos(n, t, clientes)
+            lambda clientes, n=numero, t=texto, m=modo: self._on_clientes_listos(n, t, clientes, m)
         )
         worker.signals.error.connect(
             lambda mensaje, n=numero: self._on_error_carga(n, mensaje)
@@ -212,27 +248,46 @@ class ClientesPage(QWidget):
             return
         logger.error("Error cargando clientes: %s", mensaje)
         # No se toca la tabla: se conservan las filas que ya estaban.
+        self.btn_cargar_mas.setEnabled(True)
         self.label_estado.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 600;")
         self.label_estado.setText(
             "No se pudo cargar la lista de clientes. "
             "Los datos mostrados pueden estar desactualizados."
         )
 
-    def _on_clientes_listos(self, numero: int, texto: str, clientes) -> None:
+    def _on_clientes_listos(self, numero: int, texto: str, clientes, modo: str) -> None:
         if numero != self._numero_consulta:
             return
 
-        # Se apaga el repintado mientras se llenan las filas.
+        self._hay_mas = len(clientes) > TAMANO_PAGINA
+        nuevos = clientes[:TAMANO_PAGINA]
+
+        if modo == "reset":
+            self._items = nuevos
+            fila_inicial = 0
+        else:
+            fila_inicial = len(self._items)
+            self._items.extend(nuevos)
+
+        # Se apaga el repintado mientras se llenan las filas. En "Cargar
+        # más" solo se llenan las filas nuevas; las que ya estaban no se
+        # vuelven a tocar.
         self.tabla.setUpdatesEnabled(False)
         try:
-            self.tabla.setRowCount(len(clientes))
-            for fila, c in enumerate(clientes):
-                self._llenar_fila(fila, c)
+            self.tabla.setRowCount(len(self._items))
+            for i, c in enumerate(nuevos):
+                self._llenar_fila(fila_inicial + i, c)
         finally:
             self.tabla.setUpdatesEnabled(True)
 
-        if len(clientes) > 0:
-            self.label_estado.setText(f"Mostrando {len(clientes)} cliente(s)")
+        self.btn_cargar_mas.setVisible(self._hay_mas)
+        self.btn_cargar_mas.setEnabled(True)
+
+        if len(self._items) > 0:
+            texto_estado = f"Mostrando {len(self._items)} cliente(s)"
+            if self._hay_mas:
+                texto_estado += " — hay más resultados, usa \"Cargar más\""
+            self.label_estado.setText(texto_estado)
         elif texto.strip():
             self.label_estado.setText(f"Sin resultados para '{texto}'")
         else:

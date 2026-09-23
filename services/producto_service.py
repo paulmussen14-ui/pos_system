@@ -14,8 +14,10 @@ class ProductoService:
     def __init__(self):
         self.producto_repo = ProductoRepository()
 
-    def listar(self, texto_busqueda: str = ""):
-        return self.producto_repo.listar(solo_activos=True, texto_busqueda=texto_busqueda)
+    def listar(self, texto_busqueda: str = "", limite: int | None = None, offset: int = 0):
+        return self.producto_repo.listar(
+            solo_activos=True, texto_busqueda=texto_busqueda, limite=limite, offset=offset
+        )
 
     def obtener(self, producto_id: int):
         return self.producto_repo.obtener_por_id(producto_id)

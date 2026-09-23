@@ -1,5 +1,11 @@
 """Lógica de negocio de configuración general del sistema."""
 
+import shutil
+from pathlib import Path
+
+from PIL import Image
+
+from config import APP_DATA_DIR
 from database.connection import get_db
 
 
@@ -14,7 +20,8 @@ class ConfiguracionService:
         """
         Agrega columnas nuevas a tablas existentes sin perder datos.
         Necesario porque los usuarios que ya instalaron la app tienen la
-        tabla configuracion_impresion sin la columna imprimir_dos_copias.
+        tabla configuracion_impresion sin la columna imprimir_dos_copias,
+        y la tabla configuracion sin la columna qr_yape_path.
         """
         with self.db.transaction() as cur:
             cur.execute("PRAGMA table_info(configuracion_impresion)")
@@ -24,6 +31,11 @@ class ConfiguracionService:
                     "ALTER TABLE configuracion_impresion "
                     "ADD COLUMN imprimir_dos_copias INTEGER NOT NULL DEFAULT 1"
                 )
+
+            cur.execute("PRAGMA table_info(configuracion)")
+            columnas_config = {fila["name"] for fila in cur.fetchall()}
+            if "qr_yape_path" not in columnas_config:
+                cur.execute("ALTER TABLE configuracion ADD COLUMN qr_yape_path TEXT")
 
     def _asegurar_fila_configuracion(self) -> None:
         with self.db.transaction() as cur:
@@ -63,9 +75,50 @@ class ConfiguracionService:
                 (nombre_negocio, direccion, moneda, igv_porcentaje, ticket_pie, tema),
             )
 
+    # ------------------------------------------------------ Imágenes ----
+    def _guardar_imagen(self, ruta_origen: str, nombre_archivo: str) -> str:
+        """
+        Valida que ruta_origen sea una imagen legible y la copia a
+        APP_DATA_DIR con un nombre fijo (ej. "logo.png", "qr_yape.jpg"), en
+        vez de guardar solo la ruta que eligió el usuario. Así, si el
+        usuario mueve, renombra o borra el archivo original después, el
+        logo/QR guardado en la app no se rompe.
+
+        Lanza ValueError (con un mensaje apto para mostrar al usuario) si
+        el archivo no existe o no es una imagen válida.
+        """
+        origen = Path(ruta_origen)
+        if not origen.exists():
+            raise ValueError("El archivo seleccionado no existe.")
+
+        try:
+            with Image.open(origen) as img:
+                img.verify()
+        except Exception as exc:
+            raise ValueError("El archivo seleccionado no es una imagen válida.") from exc
+
+        extension = origen.suffix.lower() or ".png"
+        destino = APP_DATA_DIR / f"{nombre_archivo}{extension}"
+
+        # Si antes había una versión con otra extensión (ej. tenía logo.jpg
+        # y ahora sube logo.png), borramos la vieja para no dejar archivos
+        # huérfanos ocupando espacio.
+        for existente in APP_DATA_DIR.glob(f"{nombre_archivo}.*"):
+            if existente != destino:
+                existente.unlink(missing_ok=True)
+
+        shutil.copyfile(origen, destino)
+        return str(destino)
+
     def actualizar_logo(self, ruta_logo: str) -> None:
+        ruta_guardada = self._guardar_imagen(ruta_logo, "logo")
         with self.db.transaction() as cur:
-            cur.execute("UPDATE configuracion SET logo_path = ? WHERE id = 1", (ruta_logo,))
+            cur.execute("UPDATE configuracion SET logo_path = ? WHERE id = 1", (ruta_guardada,))
+
+    def actualizar_qr_yape(self, ruta_qr: str | None) -> None:
+        ruta_guardada = self._guardar_imagen(ruta_qr, "qr_yape") if ruta_qr else None
+        with self.db.transaction() as cur:
+            cur.execute("UPDATE configuracion SET qr_yape_path = ? WHERE id = 1", (ruta_guardada,))
 
     def obtener_config_impresion(self) -> dict:
         cur = self.db.get_connection().execute("SELECT * FROM configuracion_impresion WHERE id = 1")

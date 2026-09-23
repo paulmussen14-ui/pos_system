@@ -23,6 +23,12 @@ _ESC_POS = {
     "corte": GS + "\x56\x42\x05",
 }
 
+# Marcador interno (no imprimible) que indica dónde va la imagen del QR de
+# Yape dentro del texto del ticket. Se reemplaza por los bytes reales del
+# comando ESC/POS de imagen en printing/ticket_printer.py, porque esos bytes
+# no son texto UTF-8 válido y no pueden vivir dentro de este string.
+MARCADOR_QR_YAPE = "\x00QR_YAPE\x00"
+
 
 def ancho_caracteres_por_papel(ancho_papel_mm: int | None) -> int:
     """
@@ -119,6 +125,10 @@ def generar_texto_ticket(
       tiene prioridad sobre el de la configuración).
     - venta["cliente_direccion"]: dirección del cliente.
     - config_negocio["yape_numero"] y ["yape_titular"]: datos de Yape.
+    - config_negocio["qr_yape_path"]: ruta a la imagen del QR de Yape. En
+      modo esc_pos se inserta el marcador MARCADOR_QR_YAPE, que
+      ticket_printer.py reemplaza por los bytes reales de la imagen. En modo
+      texto plano solo se muestra un placeholder "[QR de Yape]".
     - config_negocio["telefono_reclamos"]: número para reclamos.
     - config_negocio["politica_devolucion"]: términos de devolución.
     Los datos de "Datos del ticket" se completan solos (ver _con_datos_extra).
@@ -215,6 +225,14 @@ def generar_texto_ticket(
         if config_negocio.get("yape_titular"):
             linea_yape += f" - {config_negocio['yape_titular']}"
         lineas.extend(_lineas_envueltas(linea_yape, ancho_caracteres))
+
+    if config_negocio.get("qr_yape_path"):
+        if esc_pos:
+            lineas.append(c["align_center"])
+            lineas.append(MARCADOR_QR_YAPE)
+            lineas.append(c["align_left"])
+        else:
+            lineas.append(centrar("[QR de Yape]", ancho_caracteres))
 
     politica = config_negocio.get("politica_devolucion")
     tiene_politica = bool(politica and str(politica).strip())

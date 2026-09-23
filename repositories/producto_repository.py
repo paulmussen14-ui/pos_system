@@ -18,7 +18,15 @@ class ProductoRepository:
     def __init__(self):
         self.db = get_db()
 
-    def listar(self, solo_activos: bool = True, texto_busqueda: str = "") -> list[Producto]:
+    def listar(self, solo_activos: bool = True, texto_busqueda: str = "",
+               limite: int | None = None, offset: int = 0) -> list[Producto]:
+        """
+        limite/offset: si se indica limite, la consulta trae como máximo esa
+        cantidad de filas a partir de offset (paginación), en vez de traer
+        toda la tabla de una vez. Si limite es None, se comporta igual que
+        antes (trae todo lo que cumpla el filtro) — se deja así por
+        compatibilidad con otros llamadores que no paginan.
+        """
         query = _SELECT_BASE
         condiciones = []
         params: list = []
@@ -37,6 +45,10 @@ class ProductoRepository:
         if condiciones:
             query += " WHERE " + " AND ".join(condiciones)
         query += " ORDER BY COALESCE(c.nombre, 'zzz_sin_categoria'), p.nombre ASC"
+
+        if limite is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([limite, offset])
 
         cur = self.db.get_connection().execute(query, params)
         return [Producto.from_row(r) for r in cur.fetchall()]

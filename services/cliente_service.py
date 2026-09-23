@@ -13,8 +13,8 @@ class ClienteService:
     def __init__(self):
         self.cliente_repo = ClienteRepository()
 
-    def listar(self, texto_busqueda: str = ""):
-        return self.cliente_repo.listar(texto_busqueda)
+    def listar(self, texto_busqueda: str = "", limite: int | None = None, offset: int = 0):
+        return self.cliente_repo.listar(texto_busqueda, limite=limite, offset=offset)
 
     def obtener_por_id(self, cliente_id: int):
         return self.cliente_repo.obtener_por_id(cliente_id)
