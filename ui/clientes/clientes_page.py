@@ -79,7 +79,7 @@ class ClienteFormDialog(QDialog):
         self.cliente_service = ClienteService()
         self.cliente = cliente
         self.setWindowTitle("Editar cliente" if cliente else "Nuevo cliente")
-        self.resize(360, 220)
+        self.resize(380, 270)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -87,8 +87,11 @@ class ClienteFormDialog(QDialog):
         self.input_nombre = QLineEdit()
         self.input_telefono = QLineEdit()
         self.input_direccion = QLineEdit()
+        self.input_documento = QLineEdit()
+        self.input_documento.setPlaceholderText("DNI o RUC (opcional)")
 
         form.addRow("Nombre:", self.input_nombre)
+        form.addRow("Documento (DNI/RUC):", self.input_documento)
         form.addRow("Teléfono:", self.input_telefono)
         form.addRow("Dirección:", self.input_direccion)
         layout.addLayout(form)
@@ -97,6 +100,7 @@ class ClienteFormDialog(QDialog):
             self.input_nombre.setText(cliente.nombre)
             self.input_telefono.setText(cliente.telefono or "")
             self.input_direccion.setText(cliente.direccion or "")
+            self.input_documento.setText(cliente.documento or "")
 
         botones = QHBoxLayout()
         btn_cancelar = QPushButton("Cancelar")
@@ -114,11 +118,13 @@ class ClienteFormDialog(QDialog):
                 self.cliente_service.actualizar(
                     self.cliente.id, self.input_nombre.text(),
                     self.input_telefono.text(), self.input_direccion.text(),
+                    self.input_documento.text(),
                 )
             else:
                 self.cliente_service.crear(
                     self.input_nombre.text(),
                     self.input_telefono.text(), self.input_direccion.text(),
+                    self.input_documento.text(),
                 )
         except ClienteError as e:
             QMessageBox.warning(self, "Error", str(e))
@@ -167,8 +173,8 @@ class ClientesPage(QWidget):
         cabecera.addStretch()
 
         self.input_busqueda = QLineEdit()
-        self.input_busqueda.setPlaceholderText("Buscar cliente...")
-        self.input_busqueda.setFixedWidth(240)
+        self.input_busqueda.setPlaceholderText("Buscar por nombre, teléfono o documento...")
+        self.input_busqueda.setFixedWidth(340)
         self.input_busqueda.textChanged.connect(self._on_texto_busqueda)
         cabecera.addWidget(self.input_busqueda)
 
