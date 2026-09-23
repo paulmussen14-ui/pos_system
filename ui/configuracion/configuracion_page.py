@@ -14,6 +14,7 @@ from services.configuracion_service import ConfiguracionService
 from services.auth_service import AuthService, AuthError
 from utils.backup_manager import crear_backup, listar_backups, restaurar_backup
 from printing.ticket_printer import listar_impresoras_disponibles
+from ui.configuracion.ticket_extras_dialog import TicketExtrasDialog
 
 
 class ConfiguracionPage(QWidget):
@@ -108,6 +109,17 @@ class ConfiguracionPage(QWidget):
         btn_guardar = QPushButton("Guardar cambios")
         btn_guardar.clicked.connect(self._guardar_impresion)
         form.addRow(btn_guardar)
+
+        # Textos que salen en el ticket: reclamos, devolución, Yape, chofer.
+        # Se guardan por separado (ventana propia), no con "Guardar cambios".
+        btn_ticket = QPushButton("Datos del ticket")
+        btn_ticket.setProperty("class", "secondary")
+        btn_ticket.setToolTip(
+            "Número para reclamos, términos de devolución, Yape, chofer y "
+            "número del negocio, con vista previa del ticket."
+        )
+        btn_ticket.clicked.connect(self._abrir_datos_ticket)
+        form.addRow("Contenido del ticket:", btn_ticket)
 
         return tab
 
@@ -223,6 +235,10 @@ class ConfiguracionPage(QWidget):
             self.lista_backups.addItem(backup.name)
 
     # -------------------------------------------------------- Acciones ----
+    def _abrir_datos_ticket(self) -> None:
+        dialogo = TicketExtrasDialog(parent=self)
+        dialogo.exec()
+
     def _seleccionar_logo(self) -> None:
         ruta, _ = QFileDialog.getOpenFileName(self, "Seleccionar logo", "", "Imágenes (*.png *.jpg *.jpeg)")
         if ruta:

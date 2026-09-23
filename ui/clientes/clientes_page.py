@@ -1,18 +1,30 @@
-"""Página de Clientes: alta, edición y consulta de historial de compras."""
+"""Página de Clientes: alta, edición y consulta de historial de compras.
+
+La lista se carga en un hilo aparte (Worker) para no congelar la ventana.
+Los cambios no ocultan datos: se conservan las filas anteriores mientras
+carga o si hay un error, y una etiqueta indica cuántos clientes se muestran.
+"""
+
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
     QMessageBox
 )
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QThreadPool
 
 from services.cliente_service import ClienteService, ClienteError
+from services.venta_service import VentaService
+from services.configuracion_service import ConfiguracionService
+from printing.ticket_template import ancho_caracteres_por_papel
+from ui.widgets.ticket_preview_dialog import TicketPreviewDialog
 from utils.validators import formatear_moneda
+from utils.worker import Worker
+from utils.logger import logger
 
 # Mismo estilo de tabla usado en Ventas y Compras, para mantener
 # consistencia visual (encabezados con separación) en toda la app.
-# El encabezado usa un tono azul-gris suave en vez de blanco/gris plano.
 ESTILO_TABLA = """
     QTableWidget {
         background-color: transparent;
@@ -115,9 +127,14 @@ class ClientesPage(QWidget):
         super().__init__(parent)
         self.usuario = usuario
         self.cliente_service = ClienteService()
+        self.venta_service = VentaService()
+        self.config_service = ConfiguracionService()
 
-        # Debounce: evita disparar una consulta a la BD por cada tecla
-        # presionada. Se espera 300ms de inactividad antes de buscar.
+        # Cada consulta lleva un número. Solo se aplica la respuesta de la
+        # consulta con el número más alto (la más reciente).
+        self._numero_consulta = 0
+
+        # Debounce: espera 300ms sin escribir antes de consultar.
         self._timer_busqueda = QTimer(self)
         self._timer_busqueda.setSingleShot(True)
         self._timer_busqueda.setInterval(300)
@@ -162,38 +179,91 @@ class ClientesPage(QWidget):
         self.tabla.setStyleSheet(ESTILO_TABLA)
         layout.addWidget(self.tabla)
 
+        # Línea de estado: cargando / cuántos clientes se muestran / error.
+        self.label_estado = QLabel("")
+        self.label_estado.setStyleSheet("color: #6b7280; font-size: 12px;")
+        layout.addWidget(self.label_estado)
+
     def _on_texto_busqueda(self) -> None:
         """Reinicia el temporizador de debounce en cada tecla."""
         self._timer_busqueda.start()
 
+    # ------------------------------------------------------ Carga ----
+
     def actualizar(self) -> None:
-        clientes = self.cliente_service.listar(self.input_busqueda.text())
-        self.tabla.setRowCount(len(clientes))
+        self._numero_consulta += 1
+        numero = self._numero_consulta
+        texto = self.input_busqueda.text()
 
-        for fila, c in enumerate(clientes):
-            self.tabla.setItem(fila, 0, QTableWidgetItem(c.nombre))
-            self.tabla.setItem(fila, 1, QTableWidgetItem(c.telefono or "-"))
-            self.tabla.setItem(fila, 2, QTableWidgetItem(c.direccion or "-"))
+        self.label_estado.setStyleSheet("color: #6b7280; font-size: 12px;")
+        self.label_estado.setText("Cargando...")
 
-            widget_acciones = QWidget()
-            layout_acciones = QHBoxLayout(widget_acciones)
-            layout_acciones.setContentsMargins(6, 4, 6, 4)
-            layout_acciones.setSpacing(8)
+        worker = Worker(self.cliente_service.listar, texto)
+        worker.signals.finished.connect(
+            lambda clientes, n=numero, t=texto: self._on_clientes_listos(n, t, clientes)
+        )
+        worker.signals.error.connect(
+            lambda mensaje, n=numero: self._on_error_carga(n, mensaje)
+        )
+        QThreadPool.globalInstance().start(worker)
 
-            btn_historial = QPushButton("Historial")
-            btn_historial.setProperty("class", "secondary")
-            btn_historial.setMinimumHeight(32)
-            btn_historial.clicked.connect(lambda _, cli=c: self._ver_historial(cli))
+    def _on_error_carga(self, numero: int, mensaje: str) -> None:
+        if numero != self._numero_consulta:
+            return
+        logger.error("Error cargando clientes: %s", mensaje)
+        # No se toca la tabla: se conservan las filas que ya estaban.
+        self.label_estado.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 600;")
+        self.label_estado.setText(
+            "No se pudo cargar la lista de clientes. "
+            "Los datos mostrados pueden estar desactualizados."
+        )
 
-            btn_editar = QPushButton("Editar")
-            btn_editar.setProperty("class", "secondary")
-            btn_editar.setMinimumHeight(32)
-            btn_editar.clicked.connect(lambda _, cli=c: self._editar_cliente(cli))
+    def _on_clientes_listos(self, numero: int, texto: str, clientes) -> None:
+        if numero != self._numero_consulta:
+            return
 
-            layout_acciones.addWidget(btn_historial)
-            layout_acciones.addWidget(btn_editar)
-            self.tabla.setRowHeight(fila, 46)
-            self.tabla.setCellWidget(fila, 3, widget_acciones)
+        # Se apaga el repintado mientras se llenan las filas.
+        self.tabla.setUpdatesEnabled(False)
+        try:
+            self.tabla.setRowCount(len(clientes))
+            for fila, c in enumerate(clientes):
+                self._llenar_fila(fila, c)
+        finally:
+            self.tabla.setUpdatesEnabled(True)
+
+        if len(clientes) > 0:
+            self.label_estado.setText(f"Mostrando {len(clientes)} cliente(s)")
+        elif texto.strip():
+            self.label_estado.setText(f"Sin resultados para '{texto}'")
+        else:
+            self.label_estado.setText("No hay clientes registrados")
+
+    def _llenar_fila(self, fila: int, c) -> None:
+        self.tabla.setItem(fila, 0, QTableWidgetItem(c.nombre))
+        self.tabla.setItem(fila, 1, QTableWidgetItem(c.telefono or "-"))
+        self.tabla.setItem(fila, 2, QTableWidgetItem(c.direccion or "-"))
+
+        widget_acciones = QWidget()
+        layout_acciones = QHBoxLayout(widget_acciones)
+        layout_acciones.setContentsMargins(6, 4, 6, 4)
+        layout_acciones.setSpacing(8)
+
+        btn_historial = QPushButton("Historial")
+        btn_historial.setProperty("class", "secondary")
+        btn_historial.setMinimumHeight(32)
+        btn_historial.clicked.connect(lambda _, cli=c: self._ver_historial(cli))
+
+        btn_editar = QPushButton("Editar")
+        btn_editar.setProperty("class", "secondary")
+        btn_editar.setMinimumHeight(32)
+        btn_editar.clicked.connect(lambda _, cli=c: self._editar_cliente(cli))
+
+        layout_acciones.addWidget(btn_historial)
+        layout_acciones.addWidget(btn_editar)
+        self.tabla.setRowHeight(fila, 46)
+        self.tabla.setCellWidget(fila, 3, widget_acciones)
+
+    # ---------------------------------------------------- Acciones ----
 
     def _nuevo_cliente(self) -> None:
         dialogo = ClienteFormDialog(parent=self)
@@ -210,17 +280,20 @@ class ClientesPage(QWidget):
 
         dialogo = QDialog(self)
         dialogo.setWindowTitle(f"Historial de {cliente.nombre}")
-        dialogo.resize(420, 360)
+        dialogo.resize(640, 380)
         layout = QVBoxLayout(dialogo)
 
-        tabla = QTableWidget(0, 3)
-        tabla.setHorizontalHeaderLabels(["Venta #", "Fecha", "Total"])
+        tabla = QTableWidget(0, 4)
+        tabla.setHorizontalHeaderLabels(["Venta #", "Fecha", "Total", ""])
         header = tabla.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Fixed)
+        tabla.setColumnWidth(3, 250)
         tabla.verticalHeader().setVisible(False)
         tabla.setEditTriggers(QTableWidget.NoEditTriggers)
+        tabla.setSelectionBehavior(QTableWidget.SelectRows)
         tabla.setAlternatingRowColors(True)
         tabla.setStyleSheet(ESTILO_TABLA)
         layout.addWidget(tabla)
@@ -231,7 +304,39 @@ class ClientesPage(QWidget):
                 tabla.setItem(fila, 0, QTableWidgetItem(str(v["id"])))
                 tabla.setItem(fila, 1, QTableWidgetItem(str(v["fecha"])))
                 tabla.setItem(fila, 2, QTableWidgetItem(formatear_moneda(v["total"])))
-                tabla.setRowHeight(fila, 34)
+
+                widget_botones = QWidget()
+                layout_botones = QHBoxLayout(widget_botones)
+                layout_botones.setContentsMargins(4, 3, 4, 3)
+                layout_botones.setSpacing(6)
+
+                btn_ticket = QPushButton("Ver ticket")
+                btn_ticket.setProperty("class", "secondary")
+                btn_ticket.setMinimumHeight(30)
+                btn_ticket.clicked.connect(
+                    lambda _, venta_id=v["id"]: self._ver_ticket(venta_id, es_copia=False)
+                )
+
+                btn_copia = QPushButton("Imprimir copia")
+                btn_copia.setProperty("class", "secondary")
+                btn_copia.setMinimumHeight(30)
+                btn_copia.clicked.connect(
+                    lambda _, venta_id=v["id"]: self._ver_ticket(venta_id, es_copia=True)
+                )
+
+                layout_botones.addWidget(btn_ticket)
+                layout_botones.addWidget(btn_copia)
+                tabla.setCellWidget(fila, 3, widget_botones)
+                tabla.setRowHeight(fila, 42)
+
+            # Doble clic en cualquier parte de la fila también abre el ticket.
+            tabla.cellDoubleClicked.connect(
+                lambda fila, columna, t=tabla: self._ver_ticket_de_fila(t, fila)
+            )
+
+            ayuda = QLabel("Doble clic o \"Ver ticket\" para ver el ticket. \"Imprimir copia\" genera una reimpresión marcada como COPIA.")
+            ayuda.setStyleSheet("color: #6b7280; font-size: 11px;")
+            layout.addWidget(ayuda)
         else:
             layout.addWidget(QLabel("Este cliente aún no tiene compras registradas."))
 
@@ -239,4 +344,64 @@ class ClientesPage(QWidget):
         btn_cerrar.clicked.connect(dialogo.accept)
         layout.addWidget(btn_cerrar)
 
+        dialogo.exec()
+
+    def _ver_ticket_de_fila(self, tabla: QTableWidget, fila: int) -> None:
+        item = tabla.item(fila, 0)
+        if item is None:
+            return
+        self._ver_ticket(int(item.text()))
+
+    def _ver_ticket(self, venta_id: int, es_copia: bool = False) -> None:
+        """Abre la vista previa del ticket de una venta pasada, igual que
+        se ve al registrarla en Ventas."""
+        try:
+            venta = self.venta_service.obtener_venta_con_lineas(venta_id)
+            config_negocio = self.config_service.obtener()
+            config_impresion = self.config_service.obtener_config_impresion()
+        except Exception:
+            logger.exception("No se pudo cargar el ticket de la venta %s", venta_id)
+            QMessageBox.warning(
+                self, "Ticket",
+                f"No se pudo cargar el ticket de la venta #{venta_id}."
+            )
+            return
+
+        if not venta:
+            QMessageBox.warning(
+                self, "Ticket", f"No se encontró la venta #{venta_id}."
+            )
+            return
+
+        ancho = ancho_caracteres_por_papel(config_impresion.get("ancho_papel_mm"))
+        if config_impresion.get("activo"):
+            nombre_impresora = config_impresion.get("nombre_impresora")
+        else:
+            nombre_impresora = None
+        imprimir_dos_copias = bool(config_impresion.get("imprimir_dos_copias", True))
+
+        if es_copia:
+            # Reimpresión para reclamos y verificaciones: una sola hoja,
+            # con una marca arriba para que no se confunda con el original.
+            # Se trabaja sobre una copia de la configuración, sin cambiar
+            # lo que está guardado. ticket_template.py imprime esta marca.
+            config_negocio = dict(config_negocio)
+            config_negocio["etiqueta_reimpresion"] = (
+                "*** COPIA - REIMPRESION ***\n"
+                f"Impresa el {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            )
+            imprimir_dos_copias = False
+
+        dialogo = TicketPreviewDialog(
+            venta,
+            config_negocio,
+            nombre_impresora,
+            ancho_caracteres=ancho,
+            imprimir_dos_copias=imprimir_dos_copias,
+            parent=self,
+        )
+        if es_copia:
+            dialogo.setWindowTitle(f"Venta #{venta_id} — COPIA para reclamos")
+        else:
+            dialogo.setWindowTitle(f"Venta #{venta_id} — Ticket")
         dialogo.exec()

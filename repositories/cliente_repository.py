@@ -2,6 +2,7 @@
 
 from database.connection import get_db
 from models.cliente import Cliente
+from utils.busqueda import filtro_por_palabras
 
 
 class ClienteRepository:
@@ -10,23 +11,19 @@ class ClienteRepository:
         self.db = get_db()
 
     def listar(self, texto_busqueda: str = "") -> list[Cliente]:
-        texto_busqueda = texto_busqueda.strip()
-        if texto_busqueda:
-            # FTS5 MATCH usa el índice invertido, a diferencia de
-            # LIKE '%texto%' que fuerza un escaneo completo de la tabla.
-            # Se envuelve en comillas + "*" para hacer match por prefijo
-            # de palabra (ej. "gase" encuentra "Gaseosa Inca Kola").
-            match_expr = f'"{texto_busqueda.replace(chr(34), chr(34) * 2)}"*'
-            query = """
-                SELECT c.* FROM clientes c
-                JOIN clientes_fts fts ON fts.rowid = c.id
-                WHERE clientes_fts MATCH ?
-                ORDER BY c.nombre ASC
-            """
-            params = [match_expr]
-        else:
-            query = "SELECT * FROM clientes ORDER BY nombre ASC"
-            params = []
+        # Búsqueda por LIKE: cada palabra escrita debe aparecer en el nombre,
+        # el teléfono o el documento, en cualquier orden y en cualquier parte
+        # (ej. "perez juan" encuentra "Juan Perez", "987" encuentra por teléfono).
+        # No usa FTS a propósito: con FTS solo se encuentra por inicio de
+        # palabra y un símbolo raro puede hacer fallar la consulta.
+        filtro, params = filtro_por_palabras(
+            ["nombre", "telefono", "documento"], texto_busqueda
+        )
+
+        query = "SELECT * FROM clientes"
+        if filtro:
+            query += " WHERE " + filtro
+        query += " ORDER BY nombre ASC"
 
         cur = self.db.get_connection().execute(query, params)
         return [Cliente.from_row(r) for r in cur.fetchall()]

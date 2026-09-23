@@ -1,5 +1,8 @@
 """Genera el texto plano del ticket de venta a partir de los datos de la venta."""
 
+import textwrap
+
+from utils.logger import logger
 from utils.validators import formatear_moneda
 
 # --- Comandos ESC/POS para impresoras térmicas (se ignoran en modo texto plano) ---
@@ -57,6 +60,40 @@ def _fila_item(cantidad, precio, subtotal, moneda, ancho_caracteres) -> str:
     return f"{cant_str}x {precio_str}{subtotal_str}"[:ancho_caracteres]
 
 
+def _con_datos_extra(config_negocio: dict) -> dict:
+    """Completa la configuración con los datos guardados en "Datos del
+    ticket" (reclamos, devolución, Yape, chofer). Lo que ya venga con valor
+    en config_negocio tiene prioridad. Si algo falla, el ticket se imprime
+    igual, sin esos datos, y el error queda en el log."""
+    if config_negocio.get("_sin_datos_extra"):
+        return config_negocio
+
+    try:
+        from services.ticket_extras_service import TicketExtrasService
+        extras = TicketExtrasService().para_ticket()
+    except Exception:
+        logger.exception("No se pudieron cargar los datos extra del ticket")
+        return config_negocio
+
+    completo = dict(config_negocio)
+    for clave, valor in extras.items():
+        if not completo.get(clave):
+            completo[clave] = valor
+    return completo
+
+
+def _lineas_envueltas(texto: str, ancho_caracteres: int) -> list[str]:
+    """Parte un texto largo en varias líneas del ancho del papel, respetando
+    los saltos de línea que haya escrito el usuario."""
+    resultado = []
+    for parrafo in str(texto).splitlines():
+        if parrafo.strip() == "":
+            resultado.append("")
+        else:
+            resultado.extend(textwrap.wrap(parrafo, ancho_caracteres))
+    return resultado
+
+
 def generar_texto_ticket(
     venta: dict,
     config_negocio: dict,
@@ -74,7 +111,21 @@ def generar_texto_ticket(
     - esc_pos: si es True, agrega comandos ESC/POS (negrita, centrado, doble
       tamaño, corte de papel) para impresoras térmicas compatibles. Si es
       False, genera texto plano legible (modo vista previa / .txt).
+
+    Campos opcionales (solo se imprimen si vienen con valor, así un ticket
+    sin ellos queda igual que antes):
+    - config_negocio["telefono"]: número del negocio.
+    - config_negocio["chofer"] o venta["chofer"]: chofer (el de la venta
+      tiene prioridad sobre el de la configuración).
+    - venta["cliente_direccion"]: dirección del cliente.
+    - config_negocio["yape_numero"] y ["yape_titular"]: datos de Yape.
+    - config_negocio["telefono_reclamos"]: número para reclamos.
+    - config_negocio["politica_devolucion"]: términos de devolución.
+    Los datos de "Datos del ticket" se completan solos (ver _con_datos_extra).
+    - config_negocio["etiqueta_reimpresion"]: marca de reimpresión (ej.
+      "*** COPIA - REIMPRESION ***"); puede tener varias líneas.
     """
+    config_negocio = _con_datos_extra(config_negocio)
     moneda = config_negocio.get("moneda", "S/")
     c = _ESC_POS if esc_pos else {k: "" for k in _ESC_POS}
     lineas = []
@@ -103,6 +154,14 @@ def generar_texto_ticket(
 
     lineas.append("=" * ancho_caracteres)
 
+    # Marca de reimpresión (copias para reclamos y verificaciones).
+    etiqueta_reimpresion = config_negocio.get("etiqueta_reimpresion")
+    if etiqueta_reimpresion:
+        for texto_marca in str(etiqueta_reimpresion).splitlines():
+            marca = centrar(texto_marca[:ancho_caracteres], ancho_caracteres)
+            lineas.append(c["bold_on"] + marca + c["bold_off"] if esc_pos else marca)
+        lineas.append("-" * ancho_caracteres)
+
     if etiqueta_copia:
         marca = centrar(f"*** {etiqueta_copia} ***", ancho_caracteres)
         lineas.append(c["bold_on"] + marca + c["bold_off"] if esc_pos else marca)
@@ -112,6 +171,12 @@ def generar_texto_ticket(
     lineas.append(f"Fecha: {venta['fecha']}")
     if venta.get("cliente_nombre"):
         lineas.append(f"Cliente: {venta['cliente_nombre']}")
+    if venta.get("cliente_direccion"):
+        lineas.extend(_lineas_envueltas(f"Direccion: {venta['cliente_direccion']}", ancho_caracteres))
+
+    chofer = venta.get("chofer") or config_negocio.get("chofer")
+    if chofer:
+        lineas.extend(_lineas_envueltas(f"Chofer: {chofer}", ancho_caracteres))
     lineas.append("-" * ancho_caracteres)
 
     # --- Tabla de items ---
@@ -145,6 +210,26 @@ def generar_texto_ticket(
 
     if venta.get("metodo_pago_nombre"):
         lineas.append(f"Pago: {venta['metodo_pago_nombre']}")
+    if config_negocio.get("yape_numero"):
+        linea_yape = f"Yape: {config_negocio['yape_numero']}"
+        if config_negocio.get("yape_titular"):
+            linea_yape += f" - {config_negocio['yape_titular']}"
+        lineas.extend(_lineas_envueltas(linea_yape, ancho_caracteres))
+
+    politica = config_negocio.get("politica_devolucion")
+    tiene_politica = bool(politica and str(politica).strip())
+    tiene_reclamos = bool(config_negocio.get("telefono_reclamos"))
+
+    if tiene_politica or tiene_reclamos:
+        lineas.append("-" * ancho_caracteres)
+    if tiene_politica:
+        titulo = "TERMINOS DE DEVOLUCION"
+        lineas.append(c["bold_on"] + titulo + c["bold_off"] if esc_pos else titulo)
+        lineas.extend(_lineas_envueltas(politica, ancho_caracteres))
+    if tiene_reclamos:
+        lineas.extend(_lineas_envueltas(
+            f"Reclamos: {config_negocio['telefono_reclamos']}", ancho_caracteres
+        ))
 
     lineas.append("")
     pie = config_negocio.get("ticket_pie", "Gracias por su compra")

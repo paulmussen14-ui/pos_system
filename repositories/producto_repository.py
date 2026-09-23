@@ -3,6 +3,7 @@
 from database.connection import get_db
 from models.producto import Producto
 from models.producto_presentacion import ProductoPresentacion
+from utils.busqueda import filtro_por_palabras
 
 _SELECT_BASE = """
     SELECT p.*, c.nombre AS categoria_nombre, pr.nombre AS proveedor_nombre
@@ -24,9 +25,14 @@ class ProductoRepository:
 
         if solo_activos:
             condiciones.append("p.activo = 1")
-        if texto_busqueda:
-            condiciones.append("p.nombre LIKE ?")
-            params.append(f"%{texto_busqueda}%")
+
+        # Cada palabra escrita debe aparecer en el nombre, en cualquier
+        # orden y en cualquier parte (ej. "1.5 coca" encuentra "Coca-Cola 1.5L").
+        # Los símbolos % y _ escritos por el usuario ya no actúan como comodines.
+        filtro, params_filtro = filtro_por_palabras(["p.nombre"], texto_busqueda)
+        if filtro:
+            condiciones.append(filtro)
+            params.extend(params_filtro)
 
         if condiciones:
             query += " WHERE " + " AND ".join(condiciones)
