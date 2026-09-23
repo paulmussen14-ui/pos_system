@@ -185,7 +185,7 @@ class VentasPage(QWidget):
         self._ultima_busqueda_producto: str | None = None
 
         self._ultima_busqueda_cliente: str | None = None
-        
+
 
         self._construir_ui()
         self._cargar_metodos_pago()
@@ -528,7 +528,7 @@ class VentasPage(QWidget):
 
     def _buscar_productos(self) -> None:
         texto = self.input_busqueda_producto.text()
-        print("BUSCANDO PRODUCTOS:", repr(texto))
+        logger.debug("Buscando productos: %r", texto)
 
         self._ultima_busqueda_producto = texto
 
@@ -543,17 +543,11 @@ class VentasPage(QWidget):
         QThreadPool.globalInstance().start(worker)
 
     def _on_productos_listos(self, texto: str, productos) -> None:
-        print(
-            "PRODUCTOS RECIBIDOS:",
-            repr(texto),
-            "cantidad:",
-            len(productos),
-            "ultima:",
-            repr(self._ultima_busqueda_producto)
-        )
-
         if texto != self._ultima_busqueda_producto:
-            print("PRODUCTOS DESCARTADOS POR TEXTO DIFERENTE")
+            logger.debug(
+                "Descartando resultados de productos atrasados (texto=%r, actual=%r)",
+                texto, self._ultima_busqueda_producto,
+            )
             return
 
         moneda = self.config_service.obtener().get("moneda", "S/")
@@ -652,7 +646,7 @@ class VentasPage(QWidget):
 
     def _buscar_clientes(self) -> None:
         texto = self.input_busqueda_cliente.text()
-        print("BUSCANDO CLIENTES:", repr(texto))
+        logger.debug("Buscando clientes: %r", texto)
 
         self._ultima_busqueda_cliente = texto
 
@@ -667,17 +661,11 @@ class VentasPage(QWidget):
         QThreadPool.globalInstance().start(worker)
 
     def _on_clientes_listos(self, texto: str, clientes) -> None:
-        print(
-            "CLIENTES RECIBIDOS:",
-            repr(texto),
-            "cantidad:",
-            len(clientes),
-            "ultima:",
-            repr(self._ultima_busqueda_cliente)
-        )
-
         if texto != self._ultima_busqueda_cliente:
-            print("CLIENTES DESCARTADOS POR TEXTO DIFERENTE")
+            logger.debug(
+                "Descartando resultados de clientes atrasados (texto=%r, actual=%r)",
+                texto, self._ultima_busqueda_cliente,
+            )
             return
 
         self.tabla_clientes.setRowCount(len(clientes))
