@@ -37,8 +37,8 @@ class VentaDetalleDialog(QDialog):
         self.label_info = QLabel()
         layout.addWidget(self.label_info)
 
-        self.tabla = QTableWidget(0, 4)
-        self.tabla.setHorizontalHeaderLabels(["Producto", "Cantidad", "Precio", "Subtotal"])
+        self.tabla = QTableWidget(0, 5)
+        self.tabla.setHorizontalHeaderLabels(["Producto", "Cantidad", "Presentación", "Precio", "Subtotal"])
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -57,6 +57,7 @@ class VentaDetalleDialog(QDialog):
         fila_devolucion = QHBoxLayout()
         fila_devolucion.addWidget(QLabel("Producto:"))
         self.combo_producto_devolucion = QComboBox()
+        self.combo_producto_devolucion.currentIndexChanged.connect(self._actualizar_combo_presentacion_devolucion)
         fila_devolucion.addWidget(self.combo_producto_devolucion)
 
         fila_devolucion.addWidget(QLabel("Cantidad:"))
@@ -64,6 +65,10 @@ class VentaDetalleDialog(QDialog):
         self.input_cantidad_devolucion.setMinimum(0.01)
         self.input_cantidad_devolucion.setMaximum(999999)
         fila_devolucion.addWidget(self.input_cantidad_devolucion)
+
+        fila_devolucion.addWidget(QLabel("en:"))
+        self.combo_presentacion_devolucion = QComboBox()
+        fila_devolucion.addWidget(self.combo_presentacion_devolucion)
         layout.addLayout(fila_devolucion)
 
         self.input_motivo_devolucion = QLineEdit()
@@ -122,12 +127,25 @@ class VentaDetalleDialog(QDialog):
         lineas = venta["lineas"]
         self.tabla.setRowCount(len(lineas))
         self.combo_producto_devolucion.clear()
+        self._presentacion_vendida_por_producto = {}
         for fila, linea in enumerate(lineas):
+            # Ventas viejas no tienen presentación guardada (NULL): se
+            # muestran en unidad base, igual que en el ticket.
+            cantidad_pres = linea.get("cantidad_presentacion") or linea["cantidad"]
+            nombre_pres = linea.get("presentacion_nombre") or "Unidad"
+            factor_pres = linea.get("factor_unidades") or 1.0
             self.tabla.setItem(fila, 0, QTableWidgetItem(linea["producto_nombre"]))
-            self.tabla.setItem(fila, 1, QTableWidgetItem(str(linea["cantidad"])))
-            self.tabla.setItem(fila, 2, QTableWidgetItem(formatear_moneda(linea["precio_venta_unitario"], moneda)))
-            self.tabla.setItem(fila, 3, QTableWidgetItem(formatear_moneda(linea["subtotal"], moneda)))
+            self.tabla.setItem(fila, 1, QTableWidgetItem(f"{cantidad_pres:g}"))
+            self.tabla.setItem(fila, 2, QTableWidgetItem(nombre_pres))
+            self.tabla.setItem(fila, 3, QTableWidgetItem(formatear_moneda(linea["precio_venta_unitario"], moneda)))
+            self.tabla.setItem(fila, 4, QTableWidgetItem(formatear_moneda(linea["subtotal"], moneda)))
             self.combo_producto_devolucion.addItem(linea["producto_nombre"], linea["producto_id"])
+            # Se recuerda en qué presentación se vendió cada producto, para
+            # ofrecerla como opción al devolver (ej. devolver "1 Caja" en vez
+            # de tener que convertir a unidades sueltas a mano).
+            self._presentacion_vendida_por_producto[linea["producto_id"]] = (nombre_pres, factor_pres)
+
+        self._actualizar_combo_presentacion_devolucion()
 
     def _cargar_combo_clientes(self, cliente_id_actual: int | None) -> None:
         self.combo_cliente.clear()
@@ -160,14 +178,39 @@ class VentaDetalleDialog(QDialog):
         QMessageBox.information(self, "Venta anulada", "La venta fue anulada correctamente.")
         self._cargar_datos()
 
+    def _actualizar_combo_presentacion_devolucion(self) -> None:
+        """Arma las opciones de presentación para devolver el producto que
+        está seleccionado en combo_producto_devolucion: la misma presentación
+        con la que se vendió (preseleccionada) y, si era distinta, también
+        "Unidad" por si el cliente abrió la caja/paquete y solo devuelve
+        parte de lo vendido."""
+        self.combo_presentacion_devolucion.clear()
+        producto_id = self.combo_producto_devolucion.currentData()
+        if producto_id is None:
+            return
+
+        nombre_pres, factor_pres = self._presentacion_vendida_por_producto.get(producto_id, ("Unidad", 1.0))
+        self.combo_presentacion_devolucion.addItem(
+            f"{nombre_pres} (x{factor_pres:g})" if factor_pres != 1 else nombre_pres, factor_pres
+        )
+        if factor_pres != 1:
+            self.combo_presentacion_devolucion.addItem("Unidad", 1.0)
+
     def _registrar_devolucion(self) -> None:
         producto_id = self.combo_producto_devolucion.currentData()
         if producto_id is None:
             return
+        factor = self.combo_presentacion_devolucion.currentData() or 1.0
+        # La devolución y el stock siempre se manejan en unidad base
+        # internamente; aquí solo se convierte lo que el usuario tipeó en la
+        # presentación elegida (ej. "1 Caja" x12 = 12 unidades base).
+        cantidad_base = round(self.input_cantidad_devolucion.value() * factor, 4)
+        nombre_pres_elegida = self.combo_presentacion_devolucion.currentText() or "unidades"
         try:
             self.venta_service.registrar_devolucion(
-                self.venta_id, producto_id, self.input_cantidad_devolucion.value(),
+                self.venta_id, producto_id, cantidad_base,
                 self.input_motivo_devolucion.text(), self.usuario.id,
+                factor_presentacion=factor, nombre_presentacion=nombre_pres_elegida,
             )
         except VentaError as e:
             QMessageBox.warning(self, "Error", str(e))

@@ -34,13 +34,17 @@ class VentaRepository:
         return cursor.lastrowid
 
     def crear_linea_detalle(self, cursor, venta_id, producto_id, cantidad,
-                             precio_venta_unitario, costo_unitario_snapshot, subtotal) -> None:
+                             precio_venta_unitario, costo_unitario_snapshot, subtotal,
+                             presentacion_nombre=None, cantidad_presentacion=None,
+                             factor_unidades=None) -> None:
         cursor.execute(
             """INSERT INTO venta_detalle
                (venta_id, producto_id, cantidad, precio_venta_unitario,
-                costo_unitario_snapshot, subtotal)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (venta_id, producto_id, cantidad, precio_venta_unitario, costo_unitario_snapshot, subtotal),
+                costo_unitario_snapshot, subtotal, presentacion_nombre,
+                cantidad_presentacion, factor_unidades)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (venta_id, producto_id, cantidad, precio_venta_unitario, costo_unitario_snapshot, subtotal,
+             presentacion_nombre, cantidad_presentacion, factor_unidades),
         )
 
     def listar_ventas(self, fecha_desde: str = "", fecha_hasta: str = "", limite: int = 500) -> list[dict]:

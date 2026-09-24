@@ -213,6 +213,12 @@ CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas(cliente_id);
 -- congela el costo al momento de la venta para que la utilidad
 -- histórica nunca cambie aunque el costo del producto cambie después.
 -- ------------------------------------------------------------
+-- presentacion_nombre / cantidad_presentacion / factor_unidades: en qué
+-- medida se vendió (ej. "Caja" x12 = factor 12), igual que ya se guarda en
+-- compra_detalle. Van sin NOT NULL a propósito: en tickets ya emitidos antes
+-- de este cambio quedan en NULL, y toda la app los trata como "Unidad"
+-- (factor 1) cuando vienen vacíos, así que esos tickets viejos se siguen
+-- mostrando en unidad base, sin romper nada.
 CREATE TABLE IF NOT EXISTS venta_detalle (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     venta_id INTEGER NOT NULL REFERENCES ventas(id),
@@ -220,7 +226,10 @@ CREATE TABLE IF NOT EXISTS venta_detalle (
     cantidad REAL NOT NULL,
     precio_venta_unitario REAL NOT NULL,
     costo_unitario_snapshot REAL NOT NULL,
-    subtotal REAL NOT NULL
+    subtotal REAL NOT NULL,
+    presentacion_nombre TEXT,
+    cantidad_presentacion REAL,
+    factor_unidades REAL
 );
 CREATE INDEX IF NOT EXISTS idx_venta_detalle_venta ON venta_detalle(venta_id);
 CREATE INDEX IF NOT EXISTS idx_venta_detalle_producto ON venta_detalle(producto_id);

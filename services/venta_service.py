@@ -94,6 +94,9 @@ class VentaService:
                 self.venta_repo.crear_linea_detalle(
                     cur, venta_id, linea.producto_id, linea.cantidad,
                     linea.precio_venta_unitario, costo_vigente, linea.subtotal,
+                    presentacion_nombre=linea.presentacion_nombre,
+                    cantidad_presentacion=linea.cantidad_presentacion,
+                    factor_unidades=linea.factor_unidades,
                 )
 
                 nuevo_stock = stock_actual - linea.cantidad
@@ -163,7 +166,17 @@ class VentaService:
                 )
 
     def registrar_devolucion(self, venta_id: int, producto_id: int, cantidad: float,
-                              motivo: str, usuario_id: int) -> int:
+                              motivo: str, usuario_id: int,
+                              factor_presentacion: float = 1.0,
+                              nombre_presentacion: str = "unidades") -> int:
+        """`cantidad` siempre viene en unidad base (así se valida y se guarda,
+        igual que el stock). `factor_presentacion` / `nombre_presentacion` son
+        solo para que los mensajes de error hablen en la presentación que
+        eligió el usuario (ej. "Caja") en vez de unidades base sueltas."""
+        def _fmt(cantidad_base: float) -> str:
+            valor = cantidad_base / factor_presentacion if factor_presentacion else cantidad_base
+            return f"{valor:g} {nombre_presentacion}"
+
         if cantidad <= 0:
             raise VentaError("La cantidad a devolver debe ser mayor a cero.")
 
@@ -190,8 +203,8 @@ class VentaService:
                 if disponible <= 0:
                     raise VentaError("Este producto ya fue devuelto por completo.")
                 raise VentaError(
-                    f"Solo se puede devolver hasta {disponible:g} "
-                    f"(vendido: {vendido:g}, ya devuelto: {ya_devuelto:g})."
+                    f"Solo se puede devolver hasta {_fmt(disponible)} "
+                    f"(vendido: {_fmt(vendido)}, ya devuelto: {_fmt(ya_devuelto)})."
                 )
 
             devolucion_id = self.venta_repo.crear_devolucion(

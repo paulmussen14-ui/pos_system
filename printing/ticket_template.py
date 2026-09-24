@@ -207,9 +207,20 @@ def generar_texto_ticket(
 
     for linea in venta.get("lineas", []):
         nombre = linea["producto_nombre"]
-        cantidad = linea["cantidad"]
-        precio = linea["precio_venta_unitario"]
         subtotal = linea["subtotal"]
+
+        # presentacion_nombre / cantidad_presentacion / factor_unidades solo
+        # existen si la venta se registró después de este cambio; en tickets
+        # viejos vienen NULL y se imprimen igual que antes, en unidad base
+        # (ej. "24 x S/ 2.25" en vez de "2 Caja x12").
+        factor = linea.get("factor_unidades") or 1
+        if factor != 1 and linea.get("cantidad_presentacion"):
+            cantidad = linea["cantidad_presentacion"]
+            precio = linea["precio_venta_unitario"] * factor
+            nombre = f"{nombre} ({linea.get('presentacion_nombre') or 'Presentación'} x{factor:g})"
+        else:
+            cantidad = linea["cantidad"]
+            precio = linea["precio_venta_unitario"]
 
         # Nombres largos: se envuelven en varias líneas en vez de cortarse.
         for parte in _lineas_envueltas(nombre, ancho_caracteres) or [""]:

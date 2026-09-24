@@ -1136,6 +1136,10 @@ class VentasPage(QWidget):
 
         for linea in lineas:
 
+            # Ventas anteriores a este cambio no tienen presentación guardada
+
+            # (quedó NULL): se tratan como "Unidad" x1, igual que en el ticket.
+
             self.carrito.append(VentaDetalleItem(
 
                 producto_id=linea["producto_id"],
@@ -1147,6 +1151,12 @@ class VentasPage(QWidget):
                 precio_venta_unitario=linea["precio_venta_unitario"],
 
                 costo_unitario_snapshot=linea.get("costo_unitario_snapshot", 0.0),
+
+                presentacion_nombre=linea.get("presentacion_nombre") or "Unidad",
+
+                cantidad_presentacion=linea.get("cantidad_presentacion"),
+
+                factor_unidades=linea.get("factor_unidades") or 1.0,
 
             ))
 
