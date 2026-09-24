@@ -17,6 +17,9 @@ from services.auth_service import AuthService, AuthError
 from utils.backup_manager import crear_backup, listar_backups, restaurar_backup
 from printing.ticket_printer import listar_impresoras_disponibles
 from ui.configuracion.ticket_extras_dialog import TicketExtrasDialog
+from ui.configuracion.respaldo_acciones import (
+    exportar_productos_ui, importar_productos_ui, restaurar_backup_ui,
+)
 
 TAMANO_PREVIEW = 64
 
@@ -191,7 +194,29 @@ class ConfiguracionPage(QWidget):
         btn_restaurar.clicked.connect(self._restaurar_backup)
         layout.addWidget(btn_restaurar)
 
-        aviso = QLabel("⚠ Restaurar una copia reemplaza los datos actuales. Reinicia la app después de restaurar.")
+        btn_restaurar_archivo = QPushButton("Restaurar desde otro archivo...")
+        btn_restaurar_archivo.setProperty("class", "danger")
+        btn_restaurar_archivo.setToolTip("Elige un archivo .db de otra carpeta o de otra PC.")
+        btn_restaurar_archivo.clicked.connect(lambda: restaurar_backup_ui(self))
+        layout.addWidget(btn_restaurar_archivo)
+
+        titulo_productos = QLabel("Catálogo de productos (para migrar a otra PC)")
+        titulo_productos.setStyleSheet("font-weight: 600; margin-top: 12px;")
+        layout.addWidget(titulo_productos)
+
+        fila_productos = QHBoxLayout()
+        btn_exportar_productos = QPushButton("Exportar productos...")
+        btn_exportar_productos.clicked.connect(lambda: exportar_productos_ui(self))
+        fila_productos.addWidget(btn_exportar_productos)
+        btn_importar_productos = QPushButton("Importar productos...")
+        btn_importar_productos.clicked.connect(
+            lambda: importar_productos_ui(self, self.usuario.id)
+        )
+        fila_productos.addWidget(btn_importar_productos)
+        fila_productos.addStretch()
+        layout.addLayout(fila_productos)
+
+        aviso = QLabel("⚠ Restaurar una copia reemplaza los datos actuales. La app se reinicia sola al terminar.")
         aviso.setWordWrap(True)
         aviso.setStyleSheet("color: #92400e;")
         layout.addWidget(aviso)
@@ -362,22 +387,10 @@ class ConfiguracionPage(QWidget):
             QMessageBox.information(self, "Selecciona una copia", "Elige una copia de seguridad de la lista.")
             return
 
-        respuesta = QMessageBox.question(
-            self, "Confirmar restauración",
-            "Esto reemplazará los datos actuales. ¿Continuar?"
-        )
-        if respuesta != QMessageBox.Yes:
-            return
-
         from config import BACKUPS_DIR
-        ruta_backup = BACKUPS_DIR / item.text()
-        try:
-            restaurar_backup(ruta_backup)
-        except Exception as e:
-            QMessageBox.warning(self, "Error", str(e))
-            return
-
-        QMessageBox.information(self, "Restaurado", "Copia restaurada. Cierra y vuelve a abrir la aplicación.")
+        # La confirmación, la restauración y el reinicio de la app los
+        # maneja restaurar_backup_ui.
+        restaurar_backup_ui(self, BACKUPS_DIR / item.text())
 
     def _cambiar_password(self) -> None:
         try:

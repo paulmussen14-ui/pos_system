@@ -40,6 +40,7 @@ class VentaService:
         cliente_id: int | None,
         metodo_pago_id: int | None,
         descuento: float = 0.0,
+        chofer: str | None = None,
     ) -> int:
         if not lineas:
             raise VentaError("La venta debe tener al menos un producto.")
@@ -78,6 +79,7 @@ class VentaService:
             venta_id = self.venta_repo.crear_venta(
                 cur, cliente_id, usuario_id, subtotal, descuento, total,
                 metodo_pago_id, pago_es_efectivo, caja_sesion_id,
+                chofer=(chofer or "").strip() or None,
             )
 
             for linea in lineas:

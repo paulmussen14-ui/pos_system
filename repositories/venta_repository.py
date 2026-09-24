@@ -22,14 +22,14 @@ class VentaRepository:
         self.db = get_db()
 
     def crear_venta(self, cursor, cliente_id, usuario_id, subtotal, descuento, total,
-                     metodo_pago_id, pago_es_efectivo, caja_sesion_id) -> int:
+                     metodo_pago_id, pago_es_efectivo, caja_sesion_id, chofer=None) -> int:
         cursor.execute(
             """INSERT INTO ventas
                (cliente_id, usuario_id, subtotal, descuento, total, metodo_pago_id,
-                pago_es_efectivo, estado, caja_sesion_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'completada', ?)""",
+                pago_es_efectivo, estado, caja_sesion_id, chofer)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'completada', ?, ?)""",
             (cliente_id, usuario_id, subtotal, descuento, total,
-             metodo_pago_id, int(pago_es_efectivo), caja_sesion_id),
+             metodo_pago_id, int(pago_es_efectivo), caja_sesion_id, chofer),
         )
         return cursor.lastrowid
 

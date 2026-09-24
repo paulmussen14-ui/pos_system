@@ -18,6 +18,10 @@ from database.connection import get_db
 from utils.logger import logger
 
 
+class BaseCerradaError(Exception):
+    """La conexión ya se cerró y no se pudo reemplazar la base: hay que reiniciar la app."""
+
+
 def _limpiar_nombre(texto: str) -> str:
     """Deja solo letras, números, guion y guion bajo (nombre de archivo seguro)."""
     return re.sub(r"[^\w\-]+", "_", texto).strip("_") or "backup"
@@ -99,7 +103,16 @@ def restaurar_backup(ruta_backup: Path) -> None:
         raise
 
     get_db().close()
-    for sufijo in ("-wal", "-shm"):
-        Path(str(DATABASE_PATH) + sufijo).unlink(missing_ok=True)
-    os.replace(str(temporal), str(DATABASE_PATH))
+    try:
+        for sufijo in ("-wal", "-shm"):
+            Path(str(DATABASE_PATH) + sufijo).unlink(missing_ok=True)
+        os.replace(str(temporal), str(DATABASE_PATH))
+    except OSError as e:
+        logger.exception("No se pudo reemplazar la base de datos al restaurar")
+        _borrar_con_auxiliares(temporal)
+        raise BaseCerradaError(
+            "No se pudo reemplazar la base de datos (puede estar abierta por otro programa "
+            "o bloqueada por OneDrive). La base actual no se modificó, pero la aplicación "
+            "debe reiniciarse."
+        ) from e
     logger.info(f"Base de datos restaurada desde: {ruta_backup}")

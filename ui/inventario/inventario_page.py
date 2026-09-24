@@ -6,6 +6,7 @@ mantiene en el hilo principal a propósito.
 """
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QDoubleSpinBox,
@@ -15,6 +16,15 @@ from PySide6.QtWidgets import (
 from services.inventario_service import InventarioService, InventarioError
 from services.producto_service import ProductoService
 from utils.validators import formatear_moneda
+
+
+# Colores de estado (texto oscuro fijo para que se lea igual en tema claro y oscuro)
+_COLORES_ESTADO = {
+    "OK": ("#d4edda", "#155724"),
+    "Stock bajo": ("#fff3cd", "#856404"),
+    "Agotado": ("#f8d7da", "#721c24"),
+}
+_COLOR_CATEGORIA = ("#cfd8e3", "#1f2d3d")
 
 
 class _Senales(QObject):
@@ -51,6 +61,8 @@ class InventarioPage(QWidget):
 
         self._req_id = 0
         self._offset = 0
+        self._total_productos = 0
+        self._ultima_categoria = None
         self._pool = QThreadPool.globalInstance()
         self._senales = _Senales(self)
         self._senales.ok.connect(self._on_datos)
@@ -187,24 +199,36 @@ class InventarioPage(QWidget):
         productos = datos["productos"]
 
         if offset == 0:
+            self.tabla_stock.clearSpans()
             self.tabla_stock.setRowCount(0)
-        inicio = self.tabla_stock.rowCount()
-        self.tabla_stock.setRowCount(inicio + len(productos))
-        for i, p in enumerate(productos):
-            fila = inicio + i
+            self._total_productos = 0
+            self._ultima_categoria = None
+
+        for p in productos:
+            categoria = (getattr(p, "categoria_nombre", None) or "").strip() or "Sin categoría"
+            if categoria != self._ultima_categoria:
+                self._agregar_encabezado_categoria(categoria)
+                self._ultima_categoria = categoria
+
+            fila = self.tabla_stock.rowCount()
+            self.tabla_stock.insertRow(fila)
             self.tabla_stock.setItem(fila, 0, QTableWidgetItem(p.nombre))
             self.tabla_stock.setItem(fila, 1, QTableWidgetItem(f"{p.stock_actual} {p.unidad_medida}"))
             self.tabla_stock.setItem(fila, 2, QTableWidgetItem(str(p.stock_minimo)))
             estado = "Agotado" if p.agotado else ("Stock bajo" if p.stock_bajo else "OK")
-            self.tabla_stock.setItem(fila, 3, QTableWidgetItem(estado))
+            item_estado = QTableWidgetItem(estado)
+            fondo, texto_color = _COLORES_ESTADO[estado]
+            item_estado.setBackground(QBrush(QColor(fondo)))
+            item_estado.setForeground(QBrush(QColor(texto_color)))
+            self.tabla_stock.setItem(fila, 3, item_estado)
             self.tabla_stock.setItem(fila, 4, QTableWidgetItem(formatear_moneda(p.costo_promedio_actual)))
+            self._total_productos += 1
 
         self._offset = offset + len(productos)
-        total = self.tabla_stock.rowCount()
         self.btn_mas.setEnabled(True)
         self.btn_mas.setVisible(len(productos) == self.PAGE)
-        if total:
-            self.lbl_estado.setText(f"Mostrando {total}")
+        if self._total_productos:
+            self.lbl_estado.setText(f"Mostrando {self._total_productos}")
         else:
             self.lbl_estado.setText("Sin resultados")
 
@@ -225,6 +249,20 @@ class InventarioPage(QWidget):
                 self.combo_producto_ajuste.addItem(p.nombre, p.id)
             idx = self.combo_producto_ajuste.findData(seleccionado) if seleccionado is not None else -1
             self.combo_producto_ajuste.setCurrentIndex(idx)  # -1 = sin selección
+
+    def _agregar_encabezado_categoria(self, categoria: str) -> None:
+        """Fila de título que ocupa todo el ancho y separa los grupos."""
+        fila = self.tabla_stock.rowCount()
+        self.tabla_stock.insertRow(fila)
+        item = QTableWidgetItem(categoria)
+        fuente = QFont()
+        fuente.setBold(True)
+        item.setFont(fuente)
+        item.setBackground(QBrush(QColor(_COLOR_CATEGORIA[0])))
+        item.setForeground(QBrush(QColor(_COLOR_CATEGORIA[1])))
+        item.setFlags(Qt.ItemIsEnabled)   # no seleccionable
+        self.tabla_stock.setItem(fila, 0, item)
+        self.tabla_stock.setSpan(fila, 0, 1, self.tabla_stock.columnCount())
 
     def _on_error(self, req_id: int, mensaje: str) -> None:
         if req_id != self._req_id:

@@ -204,7 +204,8 @@ CREATE TABLE IF NOT EXISTS ventas (
     pago_es_efectivo INTEGER NOT NULL DEFAULT 0,
     estado TEXT NOT NULL DEFAULT 'completada',
     -- completada | anulada
-    caja_sesion_id INTEGER REFERENCES caja_sesiones(id)
+    caja_sesion_id INTEGER REFERENCES caja_sesiones(id),
+    chofer TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
 CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas(cliente_id);

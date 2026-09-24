@@ -39,6 +39,7 @@ from services.cliente_service import ClienteService
 from services.configuracion_service import ConfiguracionService
 
 from services.caja_service import CajaService
+from services.ticket_extras_service import TicketExtrasService
 
 from models.venta import VentaDetalleItem
 
@@ -437,6 +438,12 @@ class VentasPage(QWidget):
         self.combo_metodo_pago = QComboBox()
 
         fila_venta.addWidget(self.combo_metodo_pago)
+        fila_venta.addSpacing(16)
+        fila_venta.addWidget(QLabel("Chofer:"))
+        self.input_chofer = QLineEdit()
+        self.input_chofer.setPlaceholderText("Chofer de esta venta")
+        self.input_chofer.setMinimumWidth(180)
+        fila_venta.addWidget(self.input_chofer)
 
         fila_venta.addStretch()
 
@@ -501,10 +508,30 @@ class VentasPage(QWidget):
     def actualizar(self) -> None:
 
         self._cargar_metodos_pago()
+        self._cargar_chofer_por_defecto()
 
         self._buscar_clientes()
 
         self._buscar_productos()
+
+    def _chofer_predeterminado(self) -> str:
+        """Chofer guardado en Configuración > Datos del ticket."""
+        try:
+            return (TicketExtrasService().para_ticket().get("chofer") or "").strip()
+        except Exception:
+            logger.exception("No se pudo leer el chofer predeterminado")
+            return ""
+
+    def _cargar_chofer_por_defecto(self, forzar: bool = False) -> None:
+        """Pone el chofer predeterminado en el campo. No pisa lo que el usuario
+        escribió a mano, salvo que se pida (forzar) o siga siendo el anterior
+        predeterminado."""
+        nuevo = self._chofer_predeterminado()
+        actual = self.input_chofer.text().strip()
+        anterior = getattr(self, "_chofer_default_anterior", "")
+        if forzar or not actual or actual == anterior:
+            self.input_chofer.setText(nuevo)
+        self._chofer_default_anterior = nuevo
 
     def _cargar_metodos_pago(self) -> None:
 
@@ -959,6 +986,7 @@ class VentasPage(QWidget):
                 metodo_pago_id=metodo_pago_id,
 
                 descuento=self.input_descuento.value(),
+                chofer=self.input_chofer.text(),
 
             )
 
@@ -999,6 +1027,7 @@ class VentasPage(QWidget):
         self._refrescar_tabla_carrito()
 
         self._cargar_metodos_pago()
+        self._cargar_chofer_por_defecto(forzar=True)
 
     def _mostrar_vista_previa_ticket(self, venta_id: int) -> None:
 
