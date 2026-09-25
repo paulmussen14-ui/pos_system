@@ -1,12 +1,6 @@
 """
 Worker genérico para sacar tareas pesadas (consultas SQL, reportes, etc.)
 del hilo principal de la interfaz.
-...
-
-"""
-"""
-Worker genérico para sacar tareas pesadas (consultas SQL, reportes, etc.)
-del hilo principal de la interfaz.
 
 Uso típico en una página:
 

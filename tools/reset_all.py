@@ -4,6 +4,11 @@ opcional) para volver a empezar de cero. SOLO PARA PRUEBAS.
 """
 
 import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from config import DATABASE_PATH, APP_DATA_DIR
 
 respuesta = input(

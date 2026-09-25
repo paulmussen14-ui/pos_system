@@ -185,6 +185,24 @@ class VentaRepository:
         )
         return [dict(r) for r in cur.fetchall()]
 
+    def productos_mas_vendidos_mes(self, limite: int = 8) -> list[dict]:
+        """Igual que `productos_mas_vendidos` pero acotado al mes calendario
+        en curso, para el gráfico de ranking del dashboard."""
+        cur = self.db.get_connection().execute(
+            f"""SELECT p.nombre, SUM(vd.cantidad) AS cantidad_total,
+                      SUM(vd.subtotal) AS monto_total
+               FROM venta_detalle vd
+               JOIN productos p ON p.id = vd.producto_id
+               JOIN ventas v ON v.id = vd.venta_id
+               WHERE v.estado = 'completada'
+                 AND v.fecha >= {_MES_DESDE} AND v.fecha < {_MES_HASTA}
+               GROUP BY p.id
+               ORDER BY cantidad_total DESC
+               LIMIT ?""",
+            (limite,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
     def ventas_por_metodo_pago_mes(self) -> list[dict]:
         """Total vendido en el mes calendario en curso, agrupado por método
         de pago. Se usa en el gráfico circular del dashboard."""

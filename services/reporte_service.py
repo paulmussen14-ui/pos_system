@@ -30,6 +30,7 @@ class ReporteService:
             self.venta_repo.ventas_por_mes_del_anio(date.today().year)
         )
         ventas_metodo_pago_mes = self.venta_repo.ventas_por_metodo_pago_mes()
+        productos_mas_vendidos_mes = self.venta_repo.productos_mas_vendidos_mes(8)
 
         ventas_mes = self.venta_repo.ventas_del_mes()
         utilidad_mes = self.venta_repo.utilidad_del_mes()
@@ -50,6 +51,7 @@ class ReporteService:
             "ultimas_ventas": ultimas_ventas,
             "ventas_por_mes": ventas_por_mes,
             "ventas_metodo_pago_mes": ventas_metodo_pago_mes,
+            "productos_mas_vendidos_mes": productos_mas_vendidos_mes,
             "ventas_del_mes_total": ventas_mes["total_ventas"],
             "ventas_del_mes_cantidad": ventas_mes["cantidad"],
             "utilidad_del_mes": utilidad_mes,

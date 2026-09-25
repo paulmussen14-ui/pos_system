@@ -22,7 +22,8 @@ class ProductoFormDialog(QDialog):
 
     def _construir_ui(self) -> None:
         self.setWindowTitle("Editar producto" if self.producto else "Nuevo producto")
-        self.resize(460, 620)
+        self.resize(520, 660)
+        self.setMinimumSize(500, 600)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -98,13 +99,20 @@ class ProductoFormDialog(QDialog):
         )
         header_pres = self.tabla_presentaciones.horizontalHeader()
         header_pres.setSectionResizeMode(0, QHeaderView.Stretch)
-        header_pres.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header_pres.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header_pres.setSectionResizeMode(1, QHeaderView.Interactive)
+        header_pres.setSectionResizeMode(2, QHeaderView.Interactive)
+        header_pres.setMinimumSectionSize(120)
+        self.tabla_presentaciones.setColumnWidth(1, 140)
+        self.tabla_presentaciones.setColumnWidth(2, 130)
         self.tabla_presentaciones.verticalHeader().setVisible(False)
+        # Alto de fila suficiente para que el editor de texto no se vea
+        # recortado mientras se escribe (antes usaba el alto por defecto,
+        # demasiado angosto para ver lo que se tipea).
+        self.tabla_presentaciones.verticalHeader().setDefaultSectionSize(40)
         self.tabla_presentaciones.setEditTriggers(
             QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
         )
-        self.tabla_presentaciones.setMinimumHeight(140)
+        self.tabla_presentaciones.setMinimumHeight(160)
         layout.addWidget(self.tabla_presentaciones)
 
         fila_botones_presentaciones = QHBoxLayout()
@@ -165,6 +173,7 @@ class ProductoFormDialog(QDialog):
         self.tabla_presentaciones.setItem(fila, 0, QTableWidgetItem(nombre))
         self.tabla_presentaciones.setItem(fila, 1, QTableWidgetItem(cantidad))
         self.tabla_presentaciones.setItem(fila, 2, QTableWidgetItem(precio))
+        self.tabla_presentaciones.setRowHeight(fila, 40)
 
     def _quitar_fila_presentacion(self) -> None:
         fila = self.tabla_presentaciones.currentRow()

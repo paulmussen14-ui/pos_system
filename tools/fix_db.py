@@ -1,4 +1,12 @@
 import sqlite3
+import sys
+from pathlib import Path
+
+# Este script vive en tools/, un nivel bajo la raíz del proyecto; hay que
+# agregar la raíz al sys.path para poder importar config.py sin importar
+# desde dónde se ejecute.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from config import DATABASE_PATH
 
 print(f"Usando base de datos en: {DATABASE_PATH}")
