@@ -3,7 +3,7 @@ Yape, chofer y número del negocio, con vista previa del ticket en vivo."""
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QMessageBox
+    QPlainTextEdit, QTextEdit, QPushButton, QMessageBox
 )
 from PySide6.QtGui import QFont, QFontMetrics
 
@@ -59,7 +59,8 @@ class TicketExtrasDialog(QDialog):
         self.input_chofer = QLineEdit()
         self.input_chofer.setPlaceholderText("Chofer por defecto (opcional)")
 
-        self.input_politica = QPlainTextEdit()
+        self.input_politica = QTextEdit()
+        self.input_politica.setAcceptRichText(False)
         self.input_politica.setPlaceholderText(
             "Ej. Devoluciones dentro de 7 días con este ticket.\n"
             "No se aceptan cambios de productos abiertos."
@@ -103,6 +104,14 @@ class TicketExtrasDialog(QDialog):
 
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
+        # Fondo/color fijos a propósito (simulan papel térmico), sin depender
+        # del tema oscuro: si no se fijan aquí, el texto hereda el gris casi
+        # blanco del QSS global (" * { color: #e5e7eb; } ") sobre el fondo
+        # blanco por defecto de QPlainTextEdit, quedando casi invisible.
+        self.preview.setStyleSheet(
+            "QPlainTextEdit { background-color: #ffffff; color: #111827; "
+            "border: 1px solid #4b5563; }"
+        )
         fuente = QFont("Courier New", 9)
         fuente.setStyleHint(QFont.Monospace)
         self.preview.setFont(fuente)
