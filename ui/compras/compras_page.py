@@ -5,13 +5,15 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
     QComboBox, QMessageBox
 )
-from PySide6.QtCore import QLocale
+from PySide6.QtCore import QLocale, QThreadPool
 
 from services.compra_service import CompraService, CompraError
 from services.configuracion_service import ConfiguracionService
 from services.producto_service import ProductoService
 from ui.compras.compra_form_dialog import CompraFormDialog, _spinbox_con_punto
 from utils.validators import formatear_moneda
+from utils.worker import Worker
+from utils.logger import logger
 
 # Mismo estilo de tabla usado en Ventas y Clientes, para mantener
 # consistencia visual (encabezados con separación) en toda la app.
@@ -99,8 +101,23 @@ class ComprasPage(QWidget):
         layout.addWidget(self.tabla)
 
     def actualizar(self) -> None:
+        """Dispara la carga del listado de compras en segundo plano para no
+        congelar la UI cuando ya hay muchas compras registradas (ver el
+        mismo problema que causaba pantalla en blanco en Ventas)."""
+        worker = Worker(self.compra_service.listar_compras)
+        worker.signals.finished.connect(self._on_compras_listas)
+        worker.signals.error.connect(self._on_error_carga)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_error_carga(self, error_texto: str) -> None:
+        logger.error("Error al cargar compras: %s", error_texto)
+        QMessageBox.warning(
+            self, "Error al cargar compras",
+            "No se pudo cargar el listado de compras. Intenta de nuevo.",
+        )
+
+    def _on_compras_listas(self, compras: list[dict]) -> None:
         moneda = self.config_service.obtener().get("moneda", "S/")
-        compras = self.compra_service.listar_compras()
         self.tabla.setRowCount(len(compras))
 
         for fila, compra in enumerate(compras):

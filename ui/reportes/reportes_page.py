@@ -4,11 +4,13 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox, QDateEdit
 )
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QThreadPool
 
 from services.reporte_service import ReporteService
 from services.configuracion_service import ConfiguracionService
 from utils.validators import formatear_moneda
+from utils.worker import Worker
+from utils.logger import logger
 
 
 class ReportesPage(QWidget):
@@ -18,6 +20,7 @@ class ReportesPage(QWidget):
         self.usuario = usuario
         self.reporte_service = ReporteService()
         self.config_service = ConfiguracionService()
+        self._datos_actuales: dict = {}
         self._construir_ui()
         self.actualizar()
 
@@ -91,11 +94,43 @@ class ReportesPage(QWidget):
         return contenedor
 
     def actualizar(self) -> None:
+        """Dispara las seis consultas de reportes en un solo hilo en segundo
+        plano (todas juntas, para no abrir varios hilos a la vez contra la
+        misma conexión SQLite) y solo actualiza las tablas cuando terminan.
+        Antes esto corría en el hilo de la UI y con suficiente historial de
+        ventas/compras podía "congelar" la pantalla igual que pasaba en
+        Ventas."""
         moneda = self.config_service.obtener().get("moneda", "S/")
         desde = self.fecha_desde.date().toString("yyyy-MM-dd")
         hasta = self.fecha_hasta.date().toString("yyyy-MM-dd")
 
-        ventas = self.reporte_service.reporte_ventas(desde, hasta)
+        worker = Worker(self._cargar_todos_los_reportes, desde, hasta)
+        worker.signals.finished.connect(
+            lambda datos, moneda=moneda: self._on_reportes_listos(datos, moneda)
+        )
+        worker.signals.error.connect(self._on_error_carga)
+        QThreadPool.globalInstance().start(worker)
+
+    def _cargar_todos_los_reportes(self, desde: str, hasta: str) -> dict:
+        """Corre en el hilo en segundo plano: solo consultas, nada de widgets."""
+        return {
+            "ventas": self.reporte_service.reporte_ventas(desde, hasta),
+            "utilidad": self.reporte_service.reporte_utilidad(desde, hasta),
+            "compras": self.reporte_service.reporte_compras(),
+            "inventario": self.reporte_service.reporte_inventario(),
+            "mas_vendidos": self.reporte_service.reporte_productos_mas_vendidos(),
+            "ventas_por_cliente": self.reporte_service.reporte_ventas_por_cliente(),
+        }
+
+    def _on_error_carga(self, error_texto: str) -> None:
+        logger.error("Error al cargar reportes: %s", error_texto)
+        QMessageBox.warning(
+            self, "Error al cargar reportes",
+            "No se pudieron cargar los reportes. Intenta de nuevo.",
+        )
+
+    def _on_reportes_listos(self, datos: dict, moneda: str) -> None:
+        ventas = datos["ventas"]
         self.tabla_ventas.setRowCount(len(ventas))
         for fila, v in enumerate(ventas):
             self.tabla_ventas.setItem(fila, 0, QTableWidgetItem(str(v["id"])))
@@ -104,7 +139,7 @@ class ReportesPage(QWidget):
             self.tabla_ventas.setItem(fila, 3, QTableWidgetItem(formatear_moneda(v["total"], moneda)))
             self.tabla_ventas.setItem(fila, 4, QTableWidgetItem(v["estado"]))
 
-        utilidad = self.reporte_service.reporte_utilidad(desde, hasta)
+        utilidad = datos["utilidad"]
         self.tabla_utilidad.setRowCount(len(utilidad))
         for fila, u in enumerate(utilidad):
             self.tabla_utilidad.setItem(fila, 0, QTableWidgetItem(str(u["venta_id"])))
@@ -113,7 +148,7 @@ class ReportesPage(QWidget):
             self.tabla_utilidad.setItem(fila, 3, QTableWidgetItem(str(u["cantidad"])))
             self.tabla_utilidad.setItem(fila, 4, QTableWidgetItem(formatear_moneda(u["utilidad"], moneda)))
 
-        compras = self.reporte_service.reporte_compras()
+        compras = datos["compras"]
         self.tabla_compras.setRowCount(len(compras))
         for fila, c in enumerate(compras):
             self.tabla_compras.setItem(fila, 0, QTableWidgetItem(str(c["id"])))
@@ -121,7 +156,7 @@ class ReportesPage(QWidget):
             self.tabla_compras.setItem(fila, 2, QTableWidgetItem(c.get("proveedor_nombre") or "-"))
             self.tabla_compras.setItem(fila, 3, QTableWidgetItem(formatear_moneda(c["total"], moneda)))
 
-        inventario = self.reporte_service.reporte_inventario()
+        inventario = datos["inventario"]
         self.tabla_inventario.setRowCount(len(inventario))
         for fila, i in enumerate(inventario):
             self.tabla_inventario.setItem(fila, 0, QTableWidgetItem(i["producto"]))
@@ -130,24 +165,21 @@ class ReportesPage(QWidget):
             self.tabla_inventario.setItem(fila, 3, QTableWidgetItem(formatear_moneda(i["costo_promedio"], moneda)))
             self.tabla_inventario.setItem(fila, 4, QTableWidgetItem(formatear_moneda(i["valor_inventario"], moneda)))
 
-        mas_vendidos = self.reporte_service.reporte_productos_mas_vendidos()
+        mas_vendidos = datos["mas_vendidos"]
         self.tabla_mas_vendidos.setRowCount(len(mas_vendidos))
         for fila, m in enumerate(mas_vendidos):
             self.tabla_mas_vendidos.setItem(fila, 0, QTableWidgetItem(m["nombre"]))
             self.tabla_mas_vendidos.setItem(fila, 1, QTableWidgetItem(str(m["cantidad_total"])))
             self.tabla_mas_vendidos.setItem(fila, 2, QTableWidgetItem(formatear_moneda(m["monto_total"], moneda)))
 
-        por_cliente = self.reporte_service.reporte_ventas_por_cliente()
+        por_cliente = datos["ventas_por_cliente"]
         self.tabla_por_cliente.setRowCount(len(por_cliente))
         for fila, c in enumerate(por_cliente):
             self.tabla_por_cliente.setItem(fila, 0, QTableWidgetItem(c["cliente"]))
             self.tabla_por_cliente.setItem(fila, 1, QTableWidgetItem(str(c["cantidad_ventas"])))
             self.tabla_por_cliente.setItem(fila, 2, QTableWidgetItem(formatear_moneda(c["total_comprado"], moneda)))
 
-        self._datos_actuales = {
-            "ventas": ventas, "utilidad": utilidad, "compras": compras,
-            "inventario": inventario, "mas_vendidos": mas_vendidos, "ventas_por_cliente": por_cliente,
-        }
+        self._datos_actuales = datos
 
     def _exportar(self, nombre_reporte: str) -> None:
         datos = self._datos_actuales.get(nombre_reporte, [])
