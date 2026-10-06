@@ -2,8 +2,8 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME = "POSLocal"
-APP_VERSION = "2.0.0"
+APP_NAME = "Sistema POS Local"
+APP_VERSION = "2.1.0"
 
 
 def _get_app_data_dir() -> Path:
