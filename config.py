@@ -2,7 +2,7 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME = "Sistema POS Local"
+APP_NAME = "POSLocal"
 APP_VERSION = "2.1.0"
 
 
