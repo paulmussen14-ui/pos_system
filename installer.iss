@@ -1,5 +1,5 @@
-#define MyAppName "POSLocal"
-#define MyAppVersion "2.0.0"
+﻿#define MyAppName "POSLocal"
+#define MyAppVersion "2.1.0"
 #define MyAppExeName "POSLocal.exe"
 
 [Setup]
@@ -15,7 +15,7 @@ PrivilegesRequired=lowest
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
-Source: "dist\POSLocal\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\POSLocal.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
