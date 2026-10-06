@@ -1,5 +1,6 @@
 """Acceso a datos de movimientos de inventario."""
 
+from config import DIAS_RETENCION
 from database.connection import get_db
 
 
@@ -27,9 +28,11 @@ class InventarioRepository:
             FROM inventario_movimientos m
             JOIN productos p ON p.id = m.producto_id
         """
+        # Solo movimientos de la ventana de retención (por defecto 15 días).
+        query += f" WHERE m.fecha >= date('now', 'localtime', '-{DIAS_RETENCION - 1} days')"
         params: list = []
         if producto_id:
-            query += " WHERE m.producto_id = ?"
+            query += " AND m.producto_id = ?"
             params.append(producto_id)
         query += " ORDER BY m.fecha DESC LIMIT ?"
         params.append(limite)

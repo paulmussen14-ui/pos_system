@@ -1,5 +1,6 @@
 """Acceso a datos de clientes."""
 
+from config import DIAS_RETENCION
 from database.connection import get_db
 from models.cliente import Cliente
 from utils.busqueda import filtro_por_palabras
@@ -65,8 +66,11 @@ class ClienteRepository:
             cur.execute("DELETE FROM clientes WHERE id = ?", (cliente_id,))
 
     def historial_compras(self, cliente_id: int) -> list[dict]:
+        # Solo los tickets de la ventana de retención (por defecto 15 días).
         cur = self.db.get_connection().execute(
-            """SELECT * FROM ventas WHERE cliente_id = ? AND estado = 'completada'
+            f"""SELECT * FROM ventas
+               WHERE cliente_id = ? AND estado = 'completada'
+                 AND fecha >= date('now', 'localtime', '-{DIAS_RETENCION - 1} days')
                ORDER BY fecha DESC""",
             (cliente_id,),
         )

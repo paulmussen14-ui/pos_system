@@ -7,6 +7,7 @@ obliga a recorrer toda la tabla. Las fechas se guardan como
 'YYYY-MM-DD HH:MM:SS', así que la comparación de texto equivale a la de fechas.
 """
 
+from config import DIAS_RETENCION
 from database.connection import get_db
 
 # Rangos reutilizables (SQL) para "hoy" y "mes en curso", en hora local.
@@ -14,6 +15,9 @@ _HOY_DESDE = "date('now', 'localtime')"
 _HOY_HASTA = "date('now', 'localtime', '+1 day')"
 _MES_DESDE = "date('now', 'localtime', 'start of month')"
 _MES_HASTA = "date('now', 'localtime', 'start of month', '+1 month')"
+# Inicio de la ventana de retención (hoy y los DIAS_RETENCION-1 días anteriores).
+# Todo lo anterior se elimina al abrir la app y NUNCA se muestra en pantalla.
+_RET_DESDE = f"date('now','localtime','-{DIAS_RETENCION - 1} days')"
 
 
 class VentaRepository:
@@ -55,7 +59,7 @@ class VentaRepository:
             LEFT JOIN clientes c ON c.id = v.cliente_id
             LEFT JOIN metodos_pago mp ON mp.id = v.metodo_pago_id
         """
-        condiciones = []
+        condiciones = [f"v.fecha >= {_RET_DESDE}"]
         params: list = []
         if fecha_desde:
             condiciones.append("v.fecha >= date(?)")
@@ -172,12 +176,13 @@ class VentaRepository:
 
     def productos_mas_vendidos(self, limite: int = 10) -> list[dict]:
         cur = self.db.get_connection().execute(
-            """SELECT p.nombre, SUM(vd.cantidad) AS cantidad_total,
+            f"""SELECT p.nombre, SUM(vd.cantidad) AS cantidad_total,
                       SUM(vd.subtotal) AS monto_total
                FROM venta_detalle vd
                JOIN productos p ON p.id = vd.producto_id
                JOIN ventas v ON v.id = vd.venta_id
                WHERE v.estado = 'completada'
+                 AND v.fecha >= {_RET_DESDE}
                GROUP BY p.id
                ORDER BY cantidad_total DESC
                LIMIT ?""",
@@ -212,6 +217,49 @@ class VentaRepository:
                LEFT JOIN metodos_pago mp ON mp.id = v.metodo_pago_id
                WHERE v.estado = 'completada'
                  AND v.fecha >= {_MES_DESDE} AND v.fecha < {_MES_HASTA}
+               GROUP BY COALESCE(mp.nombre, 'Sin método')
+               ORDER BY total DESC"""
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    def ventas_por_dia_ventana(self) -> list[dict]:
+        """Total vendido por día dentro de la ventana de retención (para el
+        gráfico de línea del dashboard). Solo trae días con ventas."""
+        cur = self.db.get_connection().execute(
+            f"""SELECT date(fecha) AS dia, COALESCE(SUM(total), 0) AS total
+               FROM ventas
+               WHERE fecha >= {_RET_DESDE} AND fecha < {_HOY_HASTA}
+                 AND estado = 'completada'
+               GROUP BY date(fecha)
+               ORDER BY dia ASC"""
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    def productos_mas_vendidos_ventana(self, limite: int = 8) -> list[dict]:
+        """Ranking de productos dentro de la ventana de retención."""
+        cur = self.db.get_connection().execute(
+            f"""SELECT p.nombre, SUM(vd.cantidad) AS cantidad_total,
+                      SUM(vd.subtotal) AS monto_total
+               FROM venta_detalle vd
+               JOIN productos p ON p.id = vd.producto_id
+               JOIN ventas v ON v.id = vd.venta_id
+               WHERE v.estado = 'completada'
+                 AND v.fecha >= {_RET_DESDE} AND v.fecha < {_HOY_HASTA}
+               GROUP BY p.id
+               ORDER BY cantidad_total DESC
+               LIMIT ?""",
+            (limite,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    def ventas_por_metodo_pago_ventana(self) -> list[dict]:
+        """Total vendido por método de pago dentro de la ventana de retención."""
+        cur = self.db.get_connection().execute(
+            f"""SELECT COALESCE(mp.nombre, 'Sin método') AS metodo, SUM(v.total) AS total
+               FROM ventas v
+               LEFT JOIN metodos_pago mp ON mp.id = v.metodo_pago_id
+               WHERE v.estado = 'completada'
+                 AND v.fecha >= {_RET_DESDE} AND v.fecha < {_HOY_HASTA}
                GROUP BY COALESCE(mp.nombre, 'Sin método')
                ORDER BY total DESC"""
         )

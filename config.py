@@ -45,5 +45,8 @@ APP_LOGO_PATH = ICONS_DIR / "logo_completo.png"
 APP_LOGO_SIDEBAR_PATH = ICONS_DIR / "logo_sidebar.png"
 
 # Constantes de negocio
+# Días de historial que se conservan (ventas, movimientos de inventario, etc.).
+# Lo más antiguo se elimina solo al abrir la app. Cambiar aquí cambia todo.
+DIAS_RETENCION = 15
 STOCK_BAJO_DEFAULT_MINIMO = 5
 RECOVERY_CODE_LENGTH_BYTES = 8  # genera código de 16 caracteres hex

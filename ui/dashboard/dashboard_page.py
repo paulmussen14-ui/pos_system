@@ -10,6 +10,7 @@ from datetime import date
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea
 from PySide6.QtCore import Qt, QThreadPool, QTimer
 
+from config import DIAS_RETENCION
 from services.reporte_service import ReporteService
 from services.configuracion_service import ConfiguracionService
 from ui.widgets.metric_card import MetricCard
@@ -18,11 +19,6 @@ from ui.widgets.donut_chart import DonutChartWidget
 from ui.widgets.bar_chart import BarChartWidget
 from utils.validators import formatear_moneda
 from utils.worker import Worker
-
-_MESES_CORTO = [
-    "Ene", "Feb", "Mar", "Abr", "May", "Jun",
-    "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
-]
 
 _INTERVALO_REFRESCO_MS = 60_000  # 1 minuto
 
@@ -89,13 +85,13 @@ class DashboardPage(QWidget):
 
         fila_graficos = QHBoxLayout()
         fila_graficos.setSpacing(16)
-        self.chart_ventas_anio = LineChartWidget(f"Ventas por mes ({date.today().year})")
-        self.chart_metodo_pago = DonutChartWidget("Ventas por método de pago (este mes)")
-        fila_graficos.addWidget(self.chart_ventas_anio, 2)
+        self.chart_ventas_dias = LineChartWidget(f"Ventas por día (últimos {DIAS_RETENCION} días)")
+        self.chart_metodo_pago = DonutChartWidget(f"Ventas por método de pago (últimos {DIAS_RETENCION} días)")
+        fila_graficos.addWidget(self.chart_ventas_dias, 2)
         fila_graficos.addWidget(self.chart_metodo_pago, 1)
         layout.addLayout(fila_graficos)
 
-        self.chart_top_productos = BarChartWidget("Productos más vendidos (este mes)")
+        self.chart_top_productos = BarChartWidget(f"Productos más vendidos (últimos {DIAS_RETENCION} días)")
         layout.addWidget(self.chart_top_productos)
 
         layout.addStretch()
@@ -161,20 +157,17 @@ class DashboardPage(QWidget):
             lbl.style().unpolish(lbl)
             lbl.style().polish(lbl)
 
-        self.chart_ventas_anio.set_modo_oscuro(oscuro)
-        puntos = [
-            (_MESES_CORTO[int(fila["mes"]) - 1], fila["total"])
-            for fila in resumen["ventas_por_mes"]
-        ]
-        self.chart_ventas_anio.set_datos(puntos)
+        self.chart_ventas_dias.set_modo_oscuro(oscuro)
+        puntos = [(fila["etiqueta"], fila["total"]) for fila in resumen["ventas_por_dia"]]
+        self.chart_ventas_dias.set_datos(puntos)
 
         self.chart_metodo_pago.set_modo_oscuro(oscuro)
-        segmentos = [(fila["metodo"], fila["total"]) for fila in resumen["ventas_metodo_pago_mes"]]
+        segmentos = [(fila["metodo"], fila["total"]) for fila in resumen["ventas_metodo_pago"]]
         self.chart_metodo_pago.set_datos(segmentos, moneda)
 
         self.chart_top_productos.set_modo_oscuro(oscuro)
         ranking = [
             (fila["nombre"], fila["cantidad_total"])
-            for fila in resumen["productos_mas_vendidos_mes"]
+            for fila in resumen["productos_mas_vendidos"]
         ]
         self.chart_top_productos.set_datos(ranking, formateador=lambda v: f"{v:g} u.")

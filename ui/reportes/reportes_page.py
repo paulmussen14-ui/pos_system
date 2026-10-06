@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QDate, QThreadPool
 
+from config import DIAS_RETENCION
 from services.reporte_service import ReporteService
 from services.configuracion_service import ConfiguracionService
 from utils.tablas import carga_rapida
@@ -44,12 +45,17 @@ class ReportesPage(QWidget):
         # Filtro de fechas (aplica al tab de ventas y utilidad)
         fila_filtro = QHBoxLayout()
         fila_filtro.addWidget(QLabel("Desde:"))
+        # Solo existen los últimos DIAS_RETENCION días: no se puede elegir
+        # una fecha anterior (no habría datos) ni posterior a hoy.
+        limite_atras = QDate.currentDate().addDays(-(DIAS_RETENCION - 1))
         self.fecha_desde = QDateEdit(calendarPopup=True)
-        self.fecha_desde.setDate(QDate.currentDate().addMonths(-1))
+        self.fecha_desde.setDateRange(limite_atras, QDate.currentDate())
+        self.fecha_desde.setDate(limite_atras)
         fila_filtro.addWidget(self.fecha_desde)
 
         fila_filtro.addWidget(QLabel("Hasta:"))
         self.fecha_hasta = QDateEdit(calendarPopup=True)
+        self.fecha_hasta.setDateRange(limite_atras, QDate.currentDate())
         self.fecha_hasta.setDate(QDate.currentDate())
         fila_filtro.addWidget(self.fecha_hasta)
 

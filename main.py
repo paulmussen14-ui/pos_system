@@ -22,6 +22,7 @@ from ui.login.login_window import LoginWindow
 from ui.login.recovery_window import RecoveryWindow
 from ui.main_window import MainWindow
 from utils.logger import logger
+from utils.retencion import ejecutar_retencion_diaria
 from config import APP_ICON_PATH, APP_LOGO_PATH
 
 
@@ -124,6 +125,14 @@ def main() -> None:
 
     try:
         get_db()  # fuerza inicialización de la base de datos al arrancar
+        if splash:
+            splash.showMessage(
+                "Limpiando registros antiguos...",
+                Qt.AlignBottom | Qt.AlignHCenter,
+                Qt.darkGray,
+            )
+            app.processEvents()
+        ejecutar_retencion_diaria()  # 1 vez al día; backup previo; nunca rompe el arranque
         if splash:
             splash.showMessage(
                 "Cargando módulos...",

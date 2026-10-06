@@ -1,7 +1,8 @@
 """Lógica de agregación de datos para el dashboard y la sección de reportes."""
 
-from datetime import date
+from datetime import date, timedelta
 
+from config import DIAS_RETENCION
 from database.connection import get_db
 from repositories.venta_repository import VentaRepository
 from repositories.compra_repository import CompraRepository
@@ -19,62 +20,43 @@ class ReporteService:
         self.caja_repo = CajaRepository()
 
     def resumen_dashboard(self, usuario_id: int) -> dict:
+        """Datos del dashboard: métricas del día + gráficos de la ventana de
+        retención (últimos DIAS_RETENCION días). No calcula nada que la
+        pantalla no muestre, para que abrir/refrescar sea lo más liviano posible."""
         ventas_dia = self.venta_repo.ventas_del_dia()
-        utilidad_dia = self.venta_repo.utilidad_del_dia()
-        compras_dia = self.compra_repo.compras_del_dia()
-        estado_caja = self.caja_repo.estado_caja_actual(usuario_id)
-        stock_bajo = self.producto_repo.listar_stock_bajo()
-        agotados = self.producto_repo.listar_agotados()
-        ultimas_ventas = self.venta_repo.ultimas_ventas(10)
-        ventas_por_mes = self._rellenar_meses_sin_ventas(
-            self.venta_repo.ventas_por_mes_del_anio(date.today().year)
-        )
-        ventas_metodo_pago_mes = self.venta_repo.ventas_por_metodo_pago_mes()
-        productos_mas_vendidos_mes = self.venta_repo.productos_mas_vendidos_mes(8)
-
-        ventas_mes = self.venta_repo.ventas_del_mes()
-        utilidad_mes = self.venta_repo.utilidad_del_mes()
-        compras_mes = self.compra_repo.compras_del_mes()
-        ticket_promedio_mes = (
-            round(ventas_mes["total_ventas"] / ventas_mes["cantidad"], 2)
-            if ventas_mes["cantidad"] else 0.0
-        )
-
         return {
             "ventas_del_dia_total": ventas_dia["total_ventas"],
             "ventas_del_dia_cantidad": ventas_dia["cantidad"],
-            "utilidad_del_dia": utilidad_dia,
-            "compras_del_dia_total": compras_dia["total_compras"],
-            "estado_caja": estado_caja,
-            "stock_bajo": stock_bajo,
-            "agotados": agotados,
-            "ultimas_ventas": ultimas_ventas,
-            "ventas_por_mes": ventas_por_mes,
-            "ventas_metodo_pago_mes": ventas_metodo_pago_mes,
-            "productos_mas_vendidos_mes": productos_mas_vendidos_mes,
-            "ventas_del_mes_total": ventas_mes["total_ventas"],
-            "ventas_del_mes_cantidad": ventas_mes["cantidad"],
-            "utilidad_del_mes": utilidad_mes,
-            "compras_del_mes_total": compras_mes["total_compras"],
-            "ticket_promedio_mes": ticket_promedio_mes,
+            "utilidad_del_dia": self.venta_repo.utilidad_del_dia(),
+            "estado_caja": self.caja_repo.estado_caja_actual(usuario_id),
+            "stock_bajo": self.producto_repo.listar_stock_bajo(),
+            "agotados": self.producto_repo.listar_agotados(),
+            "ventas_por_dia": self._rellenar_dias_sin_ventas(
+                self.venta_repo.ventas_por_dia_ventana()
+            ),
+            "ventas_metodo_pago": self.venta_repo.ventas_por_metodo_pago_ventana(),
+            "productos_mas_vendidos": self.venta_repo.productos_mas_vendidos_ventana(8),
         }
 
     @staticmethod
-    def _rellenar_meses_sin_ventas(filas: list[dict]) -> list[dict]:
-        """`ventas_por_mes_del_anio` solo trae los meses con al menos una
-        venta. Para que el gráfico muestre los 12 meses del año, se
-        completan los que no tuvieron ventas con total 0."""
-        totales_por_mes = {fila["mes"]: fila["total"] for fila in filas}
+    def _rellenar_dias_sin_ventas(filas: list[dict]) -> list[dict]:
+        """`ventas_por_dia_ventana` solo trae los días con ventas. Para que el
+        gráfico muestre los DIAS_RETENCION días seguidos, se completan los
+        días sin ventas con total 0."""
+        totales = {fila["dia"]: fila["total"] for fila in filas}
+        hoy = date.today()
+        dias = [hoy - timedelta(days=i) for i in range(DIAS_RETENCION - 1, -1, -1)]
         return [
-            {"mes": f"{i:02d}", "total": totales_por_mes.get(f"{i:02d}", 0.0)}
-            for i in range(1, 13)
+            {"dia": d.isoformat(), "etiqueta": d.strftime("%d/%m"),
+             "total": totales.get(d.isoformat(), 0.0)}
+            for d in dias
         ]
 
     def reporte_ventas(self, fecha_desde: str = "", fecha_hasta: str = "") -> list[dict]:
         return self.venta_repo.listar_ventas(fecha_desde, fecha_hasta)
 
     def reporte_utilidad(self, fecha_desde: str = "", fecha_hasta: str = "") -> list[dict]:
-        query = """
+        query = f"""
             SELECT v.id AS venta_id, v.fecha, p.nombre AS producto,
                    vd.cantidad, vd.precio_venta_unitario, vd.costo_unitario_snapshot,
                    (vd.precio_venta_unitario - vd.costo_unitario_snapshot) * vd.cantidad AS utilidad
@@ -82,6 +64,7 @@ class ReporteService:
             JOIN ventas v ON v.id = vd.venta_id
             JOIN productos p ON p.id = vd.producto_id
             WHERE v.estado = 'completada'
+              AND v.fecha >= date('now', 'localtime', '-{DIAS_RETENCION - 1} days')
         """
         params: list = []
         # Rangos sobre la columna (no date(v.fecha)): aplicar una función a la
@@ -123,8 +106,10 @@ class ReporteService:
                       COALESCE(SUM(v.total), 0) AS total_comprado
                FROM clientes c
                LEFT JOIN ventas v ON v.cliente_id = c.id AND v.estado = 'completada'
+                    AND v.fecha >= date('now', 'localtime', ?)
                GROUP BY c.id
-               ORDER BY total_comprado DESC"""
+               ORDER BY total_comprado DESC""",
+            (f"-{DIAS_RETENCION - 1} days",),
         )
         return [dict(r) for r in cur.fetchall()]
 

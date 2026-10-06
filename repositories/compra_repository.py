@@ -1,5 +1,6 @@
 """Acceso a datos de compras y su detalle."""
 
+from config import DIAS_RETENCION
 from database.connection import get_db
 
 
@@ -80,9 +81,10 @@ class CompraRepository:
 
     def listar_compras(self, limite: int = 500) -> list[dict]:
         cur = self.db.get_connection().execute(
-            """SELECT co.*, pr.nombre AS proveedor_nombre
+            f"""SELECT co.*, pr.nombre AS proveedor_nombre
                FROM compras co
                LEFT JOIN proveedores pr ON pr.id = co.proveedor_id
+               WHERE co.fecha >= date('now', 'localtime', '-{DIAS_RETENCION - 1} days')
                ORDER BY co.fecha DESC LIMIT ?""",
             (limite,),
         )
