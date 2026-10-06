@@ -49,7 +49,7 @@ from datetime import datetime, timedelta
 # ------------------------------------------------------------------
 CANTIDAD_PRODUCTOS = 500
 CANTIDAD_CLIENTES = 400
-CANTIDAD_VENTAS = 300_000
+CANTIDAD_VENTAS = 20_000
 MESES_HISTORICO = 18  # rango de fechas hacia atrás para las ventas
 
 CATEGORIAS_DEFAULT = ["Cocina", "Limpieza", "Baño", "Electro menor", "Organización", "Textil hogar", "Ferretería menor"]
