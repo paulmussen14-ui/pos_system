@@ -53,11 +53,19 @@ from utils.validators import formatear_moneda
 
 from utils.worker import Worker
 
+from utils.tablas import carga_rapida, cerca_del_final
+
 from utils.logger import logger
 
 ALTURA_FILA_CARRITO = 44
 
 ALTURA_FILA_RESULTADOS = 34
+
+# Las listas de productos y clientes se piden por páginas: se muestran las
+# primeras TAMANO_PAGINA_RESULTADOS y las siguientes se cargan solas al hacer
+# scroll hasta el final. Así abrir Ventas cuesta lo mismo con 500 que con
+# 50 000 productos.
+TAMANO_PAGINA_RESULTADOS = 100
 
 ANCHO_COLUMNA_NUMERO = 32
 
@@ -175,17 +183,28 @@ class VentasPage(QWidget):
 
         self._timer_busqueda_cliente.timeout.connect(self._buscar_clientes)
 
-        # Guardan el texto que disparó la búsqueda en curso, para poder
+        # Cada consulta lleva un número: solo se aplica la respuesta de la más
+        # reciente, así una respuesta que llega tarde (y ya no corresponde a lo
+        # que el usuario tiene escrito) se descarta.
+        # `cargados` = filas ya en la tabla; `hay_mas` = quedan más páginas;
+        # `cargando` = hay una consulta en vuelo (evita pedir dos veces la
+        # misma página al hacer scroll).
 
-        # descartar una respuesta que llega tarde y ya no corresponde a lo
+        self._consulta_producto = 0
 
-        # que el usuario tiene escrito ahora (puede pasar si dos búsquedas
+        self._productos_cargados = 0
 
-        # quedan en vuelo casi al mismo tiempo).
+        self._hay_mas_productos = False
 
-        self._ultima_busqueda_producto: str | None = None
+        self._cargando_productos = False
 
-        self._ultima_busqueda_cliente: str | None = None
+        self._consulta_cliente = 0
+
+        self._clientes_cargados = 0
+
+        self._hay_mas_clientes = False
+
+        self._cargando_clientes = False
 
 
         self._construir_ui()
@@ -271,6 +290,12 @@ class VentasPage(QWidget):
 
         self.tabla_productos.setStyleSheet(ESTILO_TABLA)
 
+        # Altura de fila fija para toda la tabla (en vez de setRowHeight fila
+        # por fila) y carga de la siguiente página al llegar al final.
+        self.tabla_productos.verticalHeader().setDefaultSectionSize(ALTURA_FILA_RESULTADOS)
+
+        self.tabla_productos.verticalScrollBar().valueChanged.connect(self._on_scroll_productos)
+
         self.tabla_productos.cellDoubleClicked.connect(self._agregar_producto_seleccionado)
 
         columna_productos.addWidget(self.tabla_productos)
@@ -330,6 +355,10 @@ class VentasPage(QWidget):
         self.tabla_clientes.setAlternatingRowColors(True)
 
         self.tabla_clientes.setStyleSheet(ESTILO_TABLA)
+
+        self.tabla_clientes.verticalHeader().setDefaultSectionSize(ALTURA_FILA_RESULTADOS)
+
+        self.tabla_clientes.verticalScrollBar().valueChanged.connect(self._on_scroll_clientes)
 
         self.tabla_clientes.cellDoubleClicked.connect(self._seleccionar_cliente)
 
@@ -554,62 +583,97 @@ class VentasPage(QWidget):
     # ---------------------------------------------------- Búsqueda ----
 
     def _buscar_productos(self) -> None:
+        """Nueva búsqueda: reinicia la lista desde la primera página."""
+        self._consulta_producto += 1
+
+        self._productos_cargados = 0
+
+        self._hay_mas_productos = False
+
+        self._cargar_productos(self._consulta_producto, offset=0)
+
+    def _on_scroll_productos(self) -> None:
+        """Al llegar al final de la lista pide la siguiente página."""
+        if (
+            self._hay_mas_productos
+            and not self._cargando_productos
+            and cerca_del_final(self.tabla_productos)
+        ):
+            self._cargar_productos(self._consulta_producto, offset=self._productos_cargados)
+
+    def _cargar_productos(self, numero: int, offset: int) -> None:
         texto = self.input_busqueda_producto.text()
-        logger.debug("Buscando productos: %r", texto)
+        logger.debug("Buscando productos: %r (offset=%d)", texto, offset)
 
-        self._ultima_busqueda_producto = texto
+        self._cargando_productos = True
 
-        worker = Worker(self.producto_service.listar, texto)
-
-        worker.signals.finished.connect(
-            lambda productos, texto=texto: self._on_productos_listos(texto, productos)
+        # Se pide uno de más solo para saber si queda otra página, sin un
+        # COUNT aparte; ese de más nunca se muestra.
+        worker = Worker(
+            self.producto_service.listar, texto, TAMANO_PAGINA_RESULTADOS + 1, offset
         )
 
-        worker.signals.error.connect(self._on_error_busqueda)
+        worker.signals.finished.connect(
+            lambda productos, n=numero, o=offset: self._on_productos_listos(n, o, productos)
+        )
+
+        worker.signals.error.connect(
+            lambda mensaje, n=numero: self._on_error_busqueda(mensaje, n, "producto")
+        )
 
         QThreadPool.globalInstance().start(worker)
 
-    def _on_productos_listos(self, texto: str, productos) -> None:
-        if texto != self._ultima_busqueda_producto:
-            logger.debug(
-                "Descartando resultados de productos atrasados (texto=%r, actual=%r)",
-                texto, self._ultima_busqueda_producto,
-            )
+    def _on_productos_listos(self, numero: int, offset: int, productos) -> None:
+        if numero != self._consulta_producto:
+            logger.debug("Descartando resultados de productos atrasados (consulta %d)", numero)
             return
+
+        self._cargando_productos = False
+
+        self._hay_mas_productos = len(productos) > TAMANO_PAGINA_RESULTADOS
+
+        nuevos = productos[:TAMANO_PAGINA_RESULTADOS]
 
         moneda = self.config_service.obtener().get("moneda", "S/")
 
-        self.tabla_productos.setRowCount(len(productos))
+        # Nueva búsqueda (offset 0) reemplaza la lista; "página siguiente" solo
+        # agrega filas al final, sin tocar las que ya estaban.
+        with carga_rapida(self.tabla_productos):
+            if offset == 0:
+                self.tabla_productos.setRowCount(0)
 
-        for fila, p in enumerate(productos):
-            categoria = p.categoria_nombre or "Sin categoría"
+            fila_inicial = self.tabla_productos.rowCount()
 
-            item_categoria = QTableWidgetItem(categoria)
-            item_categoria.setData(Qt.UserRole, p.id)
+            self.tabla_productos.setRowCount(fila_inicial + len(nuevos))
 
-            self.tabla_productos.setItem(fila, 0, item_categoria)
-            self.tabla_productos.setItem(fila, 1, QTableWidgetItem(p.nombre))
-            self.tabla_productos.setItem(
-                fila,
-                2,
-                QTableWidgetItem(
-                    formatear_moneda(p.precio_venta_actual, moneda)
+            for i, p in enumerate(nuevos):
+                fila = fila_inicial + i
+
+                item_categoria = QTableWidgetItem(p.categoria_nombre or "Sin categoría")
+                item_categoria.setData(Qt.UserRole, p.id)
+
+                self.tabla_productos.setItem(fila, 0, item_categoria)
+                self.tabla_productos.setItem(fila, 1, QTableWidgetItem(p.nombre))
+                self.tabla_productos.setItem(
+                    fila, 2, QTableWidgetItem(formatear_moneda(p.precio_venta_actual, moneda))
                 )
-            )
-            self.tabla_productos.setItem(
-                fila,
-                3,
-                QTableWidgetItem(str(p.stock_actual))
-            )
+                self.tabla_productos.setItem(fila, 3, QTableWidgetItem(str(p.stock_actual)))
 
-            self.tabla_productos.setRowHeight(
-                fila,
-                ALTURA_FILA_RESULTADOS
-            )
+        self._productos_cargados = self.tabla_productos.rowCount()
 
-    def _on_error_busqueda(self, mensaje: str) -> None:
+    def _on_error_busqueda(self, mensaje: str, numero: int = 0, lista: str = "") -> None:
 
         logger.error("Error en búsqueda en segundo plano: %s", mensaje)
+
+        # Libera la bandera de la lista que falló; si no, el scroll nunca
+        # volvería a pedir la página siguiente.
+        if lista == "producto" and numero == self._consulta_producto:
+
+            self._cargando_productos = False
+
+        elif lista == "cliente" and numero == self._consulta_cliente:
+
+            self._cargando_clientes = False
 
     def _agregar_producto_seleccionado(self, fila: int, columna: int) -> None:
 
@@ -672,46 +736,73 @@ class VentasPage(QWidget):
         self._refrescar_tabla_carrito()
 
     def _buscar_clientes(self) -> None:
+        """Nueva búsqueda: reinicia la lista desde la primera página."""
+        self._consulta_cliente += 1
+
+        self._clientes_cargados = 0
+
+        self._hay_mas_clientes = False
+
+        self._cargar_clientes(self._consulta_cliente, offset=0)
+
+    def _on_scroll_clientes(self) -> None:
+        """Al llegar al final de la lista pide la siguiente página."""
+        if (
+            self._hay_mas_clientes
+            and not self._cargando_clientes
+            and cerca_del_final(self.tabla_clientes)
+        ):
+            self._cargar_clientes(self._consulta_cliente, offset=self._clientes_cargados)
+
+    def _cargar_clientes(self, numero: int, offset: int) -> None:
         texto = self.input_busqueda_cliente.text()
-        logger.debug("Buscando clientes: %r", texto)
+        logger.debug("Buscando clientes: %r (offset=%d)", texto, offset)
 
-        self._ultima_busqueda_cliente = texto
+        self._cargando_clientes = True
 
-        worker = Worker(self.cliente_service.listar, texto)
-
-        worker.signals.finished.connect(
-            lambda clientes, texto=texto: self._on_clientes_listos(texto, clientes)
+        worker = Worker(
+            self.cliente_service.listar, texto, TAMANO_PAGINA_RESULTADOS + 1, offset
         )
 
-        worker.signals.error.connect(self._on_error_busqueda)
+        worker.signals.finished.connect(
+            lambda clientes, n=numero, o=offset: self._on_clientes_listos(n, o, clientes)
+        )
+
+        worker.signals.error.connect(
+            lambda mensaje, n=numero: self._on_error_busqueda(mensaje, n, "cliente")
+        )
 
         QThreadPool.globalInstance().start(worker)
 
-    def _on_clientes_listos(self, texto: str, clientes) -> None:
-        if texto != self._ultima_busqueda_cliente:
-            logger.debug(
-                "Descartando resultados de clientes atrasados (texto=%r, actual=%r)",
-                texto, self._ultima_busqueda_cliente,
-            )
+    def _on_clientes_listos(self, numero: int, offset: int, clientes) -> None:
+        if numero != self._consulta_cliente:
+            logger.debug("Descartando resultados de clientes atrasados (consulta %d)", numero)
             return
 
-        self.tabla_clientes.setRowCount(len(clientes))
+        self._cargando_clientes = False
 
-        for fila, c in enumerate(clientes):
-            item_nombre = QTableWidgetItem(c.nombre)
-            item_nombre.setData(Qt.UserRole, (c.id, c.nombre))
+        self._hay_mas_clientes = len(clientes) > TAMANO_PAGINA_RESULTADOS
 
-            self.tabla_clientes.setItem(fila, 0, item_nombre)
-            self.tabla_clientes.setItem(
-                fila,
-                1,
-                QTableWidgetItem(c.telefono or "-")
-            )
+        nuevos = clientes[:TAMANO_PAGINA_RESULTADOS]
 
-            self.tabla_clientes.setRowHeight(
-                fila,
-                ALTURA_FILA_RESULTADOS
-            )
+        with carga_rapida(self.tabla_clientes):
+            if offset == 0:
+                self.tabla_clientes.setRowCount(0)
+
+            fila_inicial = self.tabla_clientes.rowCount()
+
+            self.tabla_clientes.setRowCount(fila_inicial + len(nuevos))
+
+            for i, c in enumerate(nuevos):
+                fila = fila_inicial + i
+
+                item_nombre = QTableWidgetItem(c.nombre)
+                item_nombre.setData(Qt.UserRole, (c.id, c.nombre))
+
+                self.tabla_clientes.setItem(fila, 0, item_nombre)
+                self.tabla_clientes.setItem(fila, 1, QTableWidgetItem(c.telefono or "-"))
+
+        self._clientes_cargados = self.tabla_clientes.rowCount()
 
     def _seleccionar_cliente(self, fila: int, columna: int) -> None:
 

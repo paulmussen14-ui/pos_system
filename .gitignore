@@ -17,3 +17,9 @@ text.txt
 *.db-wal
 *.db-shm
 __pycache__/
+
+.venv/
+*.db
+*.db-wal
+*.db-shm
+__pycache__/

@@ -11,6 +11,7 @@ from services.compra_service import CompraService, CompraError
 from services.configuracion_service import ConfiguracionService
 from services.producto_service import ProductoService
 from ui.compras.compra_form_dialog import CompraFormDialog, _spinbox_con_punto
+from utils.tablas import carga_rapida
 from utils.validators import formatear_moneda
 from utils.worker import Worker
 from utils.logger import logger
@@ -118,23 +119,27 @@ class ComprasPage(QWidget):
 
     def _on_compras_listas(self, compras: list[dict]) -> None:
         moneda = self.config_service.obtener().get("moneda", "S/")
-        self.tabla.setRowCount(len(compras))
 
-        for fila, compra in enumerate(compras):
-            self.tabla.setItem(fila, 0, QTableWidgetItem(str(compra["id"])))
-            self.tabla.setItem(fila, 1, QTableWidgetItem(str(compra["fecha"])))
-            self.tabla.setItem(fila, 2, QTableWidgetItem(compra.get("proveedor_nombre") or "-"))
-            self.tabla.setItem(fila, 3, QTableWidgetItem(compra.get("numero_documento") or "-"))
-            self.tabla.setItem(fila, 4, QTableWidgetItem(formatear_moneda(compra["total"], moneda)))
-            pago = "Contado (caja)" if compra.get("pago_es_efectivo") else "Crédito / otro"
-            self.tabla.setItem(fila, 5, QTableWidgetItem(pago))
+        # Repintado apagado mientras se llena (ver utils/tablas.py); la altura
+        # de fila se fija una vez en la tabla en vez de fila por fila.
+        with carga_rapida(self.tabla):
+            self.tabla.verticalHeader().setDefaultSectionSize(40)
+            self.tabla.setRowCount(len(compras))
 
-            btn_ver = QPushButton("Ver detalle")
-            btn_ver.setProperty("class", "secondary")
-            btn_ver.setMinimumHeight(32)
-            btn_ver.clicked.connect(lambda _, cid=compra["id"]: self._ver_detalle(cid))
-            self.tabla.setCellWidget(fila, 6, btn_ver)
-            self.tabla.setRowHeight(fila, 40)
+            for fila, compra in enumerate(compras):
+                self.tabla.setItem(fila, 0, QTableWidgetItem(str(compra["id"])))
+                self.tabla.setItem(fila, 1, QTableWidgetItem(str(compra["fecha"])))
+                self.tabla.setItem(fila, 2, QTableWidgetItem(compra.get("proveedor_nombre") or "-"))
+                self.tabla.setItem(fila, 3, QTableWidgetItem(compra.get("numero_documento") or "-"))
+                self.tabla.setItem(fila, 4, QTableWidgetItem(formatear_moneda(compra["total"], moneda)))
+                pago = "Contado (caja)" if compra.get("pago_es_efectivo") else "Crédito / otro"
+                self.tabla.setItem(fila, 5, QTableWidgetItem(pago))
+
+                btn_ver = QPushButton("Ver detalle")
+                btn_ver.setProperty("class", "secondary")
+                btn_ver.setMinimumHeight(32)
+                btn_ver.clicked.connect(lambda _, cid=compra["id"]: self._ver_detalle(cid))
+                self.tabla.setCellWidget(fila, 6, btn_ver)
 
     def _nueva_compra(self) -> None:
         dialogo = CompraFormDialog(usuario=self.usuario, parent=self)

@@ -44,7 +44,9 @@ class ProductoRepository:
 
         if condiciones:
             query += " WHERE " + " AND ".join(condiciones)
-        query += " ORDER BY COALESCE(c.nombre, 'zzz_sin_categoria'), p.nombre ASC"
+        # p.id desempata nombres repetidos: sin un orden total, con LIMIT/OFFSET
+        # un producto podría repetirse o saltarse entre una página y otra.
+        query += " ORDER BY COALESCE(c.nombre, 'zzz_sin_categoria'), p.nombre ASC, p.id ASC"
 
         if limite is not None:
             query += " LIMIT ? OFFSET ?"

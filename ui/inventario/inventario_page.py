@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from services.inventario_service import InventarioService, InventarioError
 from services.producto_service import ProductoService
+from utils.tablas import carga_rapida
 from utils.validators import formatear_moneda
 
 
@@ -204,25 +205,27 @@ class InventarioPage(QWidget):
             self._total_productos = 0
             self._ultima_categoria = None
 
-        for p in productos:
-            categoria = (getattr(p, "categoria_nombre", None) or "").strip() or "Sin categoría"
-            if categoria != self._ultima_categoria:
-                self._agregar_encabezado_categoria(categoria)
-                self._ultima_categoria = categoria
+        # Repintado apagado mientras se agregan filas (ver utils/tablas.py).
+        with carga_rapida(self.tabla_stock):
+            for p in productos:
+                categoria = (getattr(p, "categoria_nombre", None) or "").strip() or "Sin categoría"
+                if categoria != self._ultima_categoria:
+                    self._agregar_encabezado_categoria(categoria)
+                    self._ultima_categoria = categoria
 
-            fila = self.tabla_stock.rowCount()
-            self.tabla_stock.insertRow(fila)
-            self.tabla_stock.setItem(fila, 0, QTableWidgetItem(p.nombre))
-            self.tabla_stock.setItem(fila, 1, QTableWidgetItem(f"{p.stock_actual} {p.unidad_medida}"))
-            self.tabla_stock.setItem(fila, 2, QTableWidgetItem(str(p.stock_minimo)))
-            estado = "Agotado" if p.agotado else ("Stock bajo" if p.stock_bajo else "OK")
-            item_estado = QTableWidgetItem(estado)
-            fondo, texto_color = _COLORES_ESTADO[estado]
-            item_estado.setBackground(QBrush(QColor(fondo)))
-            item_estado.setForeground(QBrush(QColor(texto_color)))
-            self.tabla_stock.setItem(fila, 3, item_estado)
-            self.tabla_stock.setItem(fila, 4, QTableWidgetItem(formatear_moneda(p.costo_promedio_actual)))
-            self._total_productos += 1
+                fila = self.tabla_stock.rowCount()
+                self.tabla_stock.insertRow(fila)
+                self.tabla_stock.setItem(fila, 0, QTableWidgetItem(p.nombre))
+                self.tabla_stock.setItem(fila, 1, QTableWidgetItem(f"{p.stock_actual} {p.unidad_medida}"))
+                self.tabla_stock.setItem(fila, 2, QTableWidgetItem(str(p.stock_minimo)))
+                estado = "Agotado" if p.agotado else ("Stock bajo" if p.stock_bajo else "OK")
+                item_estado = QTableWidgetItem(estado)
+                fondo, texto_color = _COLORES_ESTADO[estado]
+                item_estado.setBackground(QBrush(QColor(fondo)))
+                item_estado.setForeground(QBrush(QColor(texto_color)))
+                self.tabla_stock.setItem(fila, 3, item_estado)
+                self.tabla_stock.setItem(fila, 4, QTableWidgetItem(formatear_moneda(p.costo_promedio_actual)))
+                self._total_productos += 1
 
         self._offset = offset + len(productos)
         self.btn_mas.setEnabled(True)
@@ -234,21 +237,30 @@ class InventarioPage(QWidget):
 
         if "movimientos" in datos:
             movimientos = datos["movimientos"]
-            self.tabla_movimientos.setRowCount(len(movimientos))
-            for fila, m in enumerate(movimientos):
-                self.tabla_movimientos.setItem(fila, 0, QTableWidgetItem(str(m["fecha"])))
-                self.tabla_movimientos.setItem(fila, 1, QTableWidgetItem(m["producto_nombre"]))
-                self.tabla_movimientos.setItem(fila, 2, QTableWidgetItem(m["tipo"]))
-                self.tabla_movimientos.setItem(fila, 3, QTableWidgetItem(str(m["cantidad"])))
-                self.tabla_movimientos.setItem(fila, 4, QTableWidgetItem(m.get("referencia_tipo") or "-"))
+            with carga_rapida(self.tabla_movimientos):
+                self.tabla_movimientos.setRowCount(len(movimientos))
+                for fila, m in enumerate(movimientos):
+                    self.tabla_movimientos.setItem(fila, 0, QTableWidgetItem(str(m["fecha"])))
+                    self.tabla_movimientos.setItem(fila, 1, QTableWidgetItem(m["producto_nombre"]))
+                    self.tabla_movimientos.setItem(fila, 2, QTableWidgetItem(m["tipo"]))
+                    self.tabla_movimientos.setItem(fila, 3, QTableWidgetItem(str(m["cantidad"])))
+                    self.tabla_movimientos.setItem(fila, 4, QTableWidgetItem(m.get("referencia_tipo") or "-"))
 
         if "combo" in datos:
             seleccionado = self.combo_producto_ajuste.currentData()
-            self.combo_producto_ajuste.clear()
-            for p in datos["combo"]:
-                self.combo_producto_ajuste.addItem(p.nombre, p.id)
-            idx = self.combo_producto_ajuste.findData(seleccionado) if seleccionado is not None else -1
-            self.combo_producto_ajuste.setCurrentIndex(idx)  # -1 = sin selección
+            combo = self.combo_producto_ajuste
+            # Sin repintar ni emitir señales mientras se agregan los productos.
+            combo.setUpdatesEnabled(False)
+            combo.blockSignals(True)
+            try:
+                combo.clear()
+                for p in datos["combo"]:
+                    combo.addItem(p.nombre, p.id)
+            finally:
+                combo.blockSignals(False)
+                combo.setUpdatesEnabled(True)
+            idx = combo.findData(seleccionado) if seleccionado is not None else -1
+            combo.setCurrentIndex(idx)  # -1 = sin selección
 
     def _agregar_encabezado_categoria(self, categoria: str) -> None:
         """Fila de título que ocupa todo el ancho y separa los grupos."""

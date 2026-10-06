@@ -84,11 +84,14 @@ class ReporteService:
             WHERE v.estado = 'completada'
         """
         params: list = []
+        # Rangos sobre la columna (no date(v.fecha)): aplicar una función a la
+        # columna impide usar idx_ventas_fecha. Equivale a la comparación por
+        # día porque las fechas se guardan como 'YYYY-MM-DD HH:MM:SS'.
         if fecha_desde:
-            query += " AND date(v.fecha) >= date(?)"
+            query += " AND v.fecha >= date(?)"
             params.append(fecha_desde)
         if fecha_hasta:
-            query += " AND date(v.fecha) <= date(?)"
+            query += " AND v.fecha < date(?, '+1 day')"
             params.append(fecha_hasta)
         query += " ORDER BY v.fecha DESC"
 

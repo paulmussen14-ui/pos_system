@@ -8,9 +8,16 @@ from PySide6.QtCore import QDate, QThreadPool
 
 from services.reporte_service import ReporteService
 from services.configuracion_service import ConfiguracionService
+from utils.tablas import carga_rapida
 from utils.validators import formatear_moneda
 from utils.worker import Worker
 from utils.logger import logger
+
+# Máximo de filas que se dibujan por tabla. Un reporte (p. ej. utilidad de un
+# año completo) puede tener decenas de miles de filas; dibujarlas todas
+# congela la ventana. La exportación a Excel sigue incluyendo TODAS las filas,
+# porque usa los datos en memoria y no lo que se ve en la tabla.
+MAX_FILAS_EN_PANTALLA = 1000
 
 
 class ReportesPage(QWidget):
@@ -21,6 +28,7 @@ class ReportesPage(QWidget):
         self.reporte_service = ReporteService()
         self.config_service = ConfiguracionService()
         self._datos_actuales: dict = {}
+        self._avisos: dict[str, QLabel] = {}
         self._construir_ui()
         self.actualizar()
 
@@ -90,6 +98,15 @@ class ReportesPage(QWidget):
         btn_exportar.setProperty("class", "secondary")
         btn_exportar.clicked.connect(lambda: self._exportar(nombre_reporte))
         layout.addWidget(btn_exportar)
+
+        # Aviso que aparece solo cuando el reporte tiene más filas de las que
+        # se muestran (ver MAX_FILAS_EN_PANTALLA).
+        aviso = QLabel("")
+        aviso.setStyleSheet("color: #6b7280; font-size: 12px;")
+        aviso.setVisible(False)
+        self._avisos[nombre_reporte] = aviso
+        layout.addWidget(aviso)
+
         layout.addWidget(tabla)
         return contenedor
 
@@ -129,55 +146,75 @@ class ReportesPage(QWidget):
             "No se pudieron cargar los reportes. Intenta de nuevo.",
         )
 
+    def _llenar_tabla(self, tabla: QTableWidget, nombre_reporte: str, filas: list, celdas) -> None:
+        """Llena `tabla` con a lo sumo MAX_FILAS_EN_PANTALLA filas.
+
+        `celdas(fila)` devuelve los textos de las columnas de esa fila. Si el
+        reporte tiene más filas de las que se dibujan, se avisa en pantalla.
+        """
+        total = len(filas)
+        visibles = filas[:MAX_FILAS_EN_PANTALLA]
+
+        with carga_rapida(tabla):
+            tabla.setRowCount(len(visibles))
+            for i, fila in enumerate(visibles):
+                for columna, texto in enumerate(celdas(fila)):
+                    tabla.setItem(i, columna, QTableWidgetItem(texto))
+
+        aviso = self._avisos[nombre_reporte]
+        if total > len(visibles):
+            aviso.setText(
+                f"Mostrando las primeras {len(visibles)} de {total} filas. "
+                "\"Exportar a Excel\" incluye todas."
+            )
+            aviso.setVisible(True)
+        else:
+            aviso.setVisible(False)
+
     def _on_reportes_listos(self, datos: dict, moneda: str) -> None:
-        ventas = datos["ventas"]
-        self.tabla_ventas.setRowCount(len(ventas))
-        for fila, v in enumerate(ventas):
-            self.tabla_ventas.setItem(fila, 0, QTableWidgetItem(str(v["id"])))
-            self.tabla_ventas.setItem(fila, 1, QTableWidgetItem(str(v["fecha"])))
-            self.tabla_ventas.setItem(fila, 2, QTableWidgetItem(v.get("cliente_nombre") or "-"))
-            self.tabla_ventas.setItem(fila, 3, QTableWidgetItem(formatear_moneda(v["total"], moneda)))
-            self.tabla_ventas.setItem(fila, 4, QTableWidgetItem(v["estado"]))
-
-        utilidad = datos["utilidad"]
-        self.tabla_utilidad.setRowCount(len(utilidad))
-        for fila, u in enumerate(utilidad):
-            self.tabla_utilidad.setItem(fila, 0, QTableWidgetItem(str(u["venta_id"])))
-            self.tabla_utilidad.setItem(fila, 1, QTableWidgetItem(str(u["fecha"])))
-            self.tabla_utilidad.setItem(fila, 2, QTableWidgetItem(u["producto"]))
-            self.tabla_utilidad.setItem(fila, 3, QTableWidgetItem(str(u["cantidad"])))
-            self.tabla_utilidad.setItem(fila, 4, QTableWidgetItem(formatear_moneda(u["utilidad"], moneda)))
-
-        compras = datos["compras"]
-        self.tabla_compras.setRowCount(len(compras))
-        for fila, c in enumerate(compras):
-            self.tabla_compras.setItem(fila, 0, QTableWidgetItem(str(c["id"])))
-            self.tabla_compras.setItem(fila, 1, QTableWidgetItem(str(c["fecha"])))
-            self.tabla_compras.setItem(fila, 2, QTableWidgetItem(c.get("proveedor_nombre") or "-"))
-            self.tabla_compras.setItem(fila, 3, QTableWidgetItem(formatear_moneda(c["total"], moneda)))
-
-        inventario = datos["inventario"]
-        self.tabla_inventario.setRowCount(len(inventario))
-        for fila, i in enumerate(inventario):
-            self.tabla_inventario.setItem(fila, 0, QTableWidgetItem(i["producto"]))
-            self.tabla_inventario.setItem(fila, 1, QTableWidgetItem(str(i["stock_actual"])))
-            self.tabla_inventario.setItem(fila, 2, QTableWidgetItem(str(i["stock_minimo"])))
-            self.tabla_inventario.setItem(fila, 3, QTableWidgetItem(formatear_moneda(i["costo_promedio"], moneda)))
-            self.tabla_inventario.setItem(fila, 4, QTableWidgetItem(formatear_moneda(i["valor_inventario"], moneda)))
-
-        mas_vendidos = datos["mas_vendidos"]
-        self.tabla_mas_vendidos.setRowCount(len(mas_vendidos))
-        for fila, m in enumerate(mas_vendidos):
-            self.tabla_mas_vendidos.setItem(fila, 0, QTableWidgetItem(m["nombre"]))
-            self.tabla_mas_vendidos.setItem(fila, 1, QTableWidgetItem(str(m["cantidad_total"])))
-            self.tabla_mas_vendidos.setItem(fila, 2, QTableWidgetItem(formatear_moneda(m["monto_total"], moneda)))
-
-        por_cliente = datos["ventas_por_cliente"]
-        self.tabla_por_cliente.setRowCount(len(por_cliente))
-        for fila, c in enumerate(por_cliente):
-            self.tabla_por_cliente.setItem(fila, 0, QTableWidgetItem(c["cliente"]))
-            self.tabla_por_cliente.setItem(fila, 1, QTableWidgetItem(str(c["cantidad_ventas"])))
-            self.tabla_por_cliente.setItem(fila, 2, QTableWidgetItem(formatear_moneda(c["total_comprado"], moneda)))
+        self._llenar_tabla(
+            self.tabla_ventas, "ventas", datos["ventas"],
+            lambda v: [
+                str(v["id"]), str(v["fecha"]), v.get("cliente_nombre") or "-",
+                formatear_moneda(v["total"], moneda), v["estado"],
+            ],
+        )
+        self._llenar_tabla(
+            self.tabla_utilidad, "utilidad", datos["utilidad"],
+            lambda u: [
+                str(u["venta_id"]), str(u["fecha"]), u["producto"],
+                str(u["cantidad"]), formatear_moneda(u["utilidad"], moneda),
+            ],
+        )
+        self._llenar_tabla(
+            self.tabla_compras, "compras", datos["compras"],
+            lambda c: [
+                str(c["id"]), str(c["fecha"]), c.get("proveedor_nombre") or "-",
+                formatear_moneda(c["total"], moneda),
+            ],
+        )
+        self._llenar_tabla(
+            self.tabla_inventario, "inventario", datos["inventario"],
+            lambda i: [
+                i["producto"], str(i["stock_actual"]), str(i["stock_minimo"]),
+                formatear_moneda(i["costo_promedio"], moneda),
+                formatear_moneda(i["valor_inventario"], moneda),
+            ],
+        )
+        self._llenar_tabla(
+            self.tabla_mas_vendidos, "mas_vendidos", datos["mas_vendidos"],
+            lambda m: [
+                m["nombre"], str(m["cantidad_total"]),
+                formatear_moneda(m["monto_total"], moneda),
+            ],
+        )
+        self._llenar_tabla(
+            self.tabla_por_cliente, "ventas_por_cliente", datos["ventas_por_cliente"],
+            lambda c: [
+                c["cliente"], str(c["cantidad_ventas"]),
+                formatear_moneda(c["total_comprado"], moneda),
+            ],
+        )
 
         self._datos_actuales = datos
 

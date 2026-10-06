@@ -29,7 +29,9 @@ class ClienteRepository:
         query = "SELECT * FROM clientes"
         if filtro:
             query += " WHERE " + filtro
-        query += " ORDER BY nombre ASC"
+        # id desempata nombres repetidos para que la paginación (LIMIT/OFFSET)
+        # no repita ni salte clientes entre páginas.
+        query += " ORDER BY nombre ASC, id ASC"
 
         if limite is not None:
             query += " LIMIT ? OFFSET ?"
