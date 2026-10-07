@@ -11,10 +11,11 @@ configuradas (cliente + control interno, o solo una, según configuración).
 """
 
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QMessageBox
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontMetrics
 
 from printing.ticket_printer import imprimir_ticket_venta, TicketPrinterError
 from printing.ticket_template import generar_texto_ticket
+from ui.widgets.ticket_html import ticket_a_html
 
 
 class TicketPreviewDialog(QDialog):
@@ -41,12 +42,21 @@ class TicketPreviewDialog(QDialog):
 
         self.texto = QTextEdit()
         self.texto.setReadOnly(True)
-        self.texto.setPlainText(self.texto_vista_previa)
         fuente = QFont("Courier New")
         fuente.setStyleHint(QFont.Monospace)
         fuente.setPointSize(11)
         self.texto.setFont(fuente)
         self.texto.setLineWrapMode(QTextEdit.NoWrap)
+
+        # Si hay QR de Yape configurado, se muestra la imagen real en su lugar.
+        ancho_papel_px = QFontMetrics(fuente).horizontalAdvance("0") * ancho_caracteres
+        contenido_html = ticket_a_html(
+            self.texto_vista_previa, self.config_negocio.get("qr_yape_path"), ancho_papel_px
+        )
+        if contenido_html:
+            self.texto.setHtml(contenido_html)
+        else:
+            self.texto.setPlainText(self.texto_vista_previa)
 
         # Ancho aproximado de "rollo": columnas de texto * ancho de carácter monoespaciado.
         ancho_px = max(260, int(ancho_caracteres * 8.2) + 40)

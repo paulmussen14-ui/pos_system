@@ -9,6 +9,7 @@ from PySide6.QtGui import QFont, QFontMetrics
 
 from services.ticket_extras_service import TicketExtrasService
 from printing.ticket_template import generar_texto_ticket
+from ui.widgets.ticket_html import ticket_a_html
 from utils.logger import logger
 
 ANCHO_PREVIEW_CARACTERES = 32  # papel de 58 mm
@@ -107,23 +108,24 @@ class TicketExtrasDialog(QDialog):
         columna_preview = QVBoxLayout()
         columna_preview.addWidget(QLabel("Vista previa (papel de 58 mm):"))
 
-        self.preview = QPlainTextEdit()
+        self.preview = QTextEdit()
         self.preview.setReadOnly(True)
         # Fondo/color fijos a propósito (simulan papel térmico), sin depender
         # del tema oscuro: si no se fijan aquí, el texto hereda el gris casi
         # blanco del QSS global (" * { color: #e5e7eb; } ") sobre el fondo
         # blanco por defecto de QPlainTextEdit, quedando casi invisible.
         self.preview.setStyleSheet(
-            "QPlainTextEdit { background-color: #ffffff; color: #111827; "
+            "QTextEdit { background-color: #ffffff; color: #111827; "
             "border: 1px solid #4b5563; }"
         )
         fuente = QFont("Courier New", 9)
         fuente.setStyleHint(QFont.Monospace)
         self.preview.setFont(fuente)
         metricas = QFontMetrics(fuente)
+        self._ancho_papel_px = metricas.horizontalAdvance("0") * ANCHO_PREVIEW_CARACTERES
         ancho_texto = metricas.horizontalAdvance("0") * (ANCHO_PREVIEW_CARACTERES + 3)
         self.preview.setMinimumWidth(ancho_texto)
-        self.preview.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.preview.setLineWrapMode(QTextEdit.NoWrap)
         columna_preview.addWidget(self.preview)
 
         layout_principal.addLayout(columna_preview, 2)
@@ -185,7 +187,7 @@ class TicketExtrasDialog(QDialog):
             "direccion": (base.get("direccion") or "").strip(),
             "moneda": base.get("moneda") or "S/",
             "ticket_pie": base.get("ticket_pie") if base.get("ticket_pie") is not None else "Gracias por su compra",
-            "qr_yape_path": base.get("qr_yape_path") if datos["yape_numero"] else None,
+            "qr_yape_path": base.get("qr_yape_path"),
             "telefono": datos["telefono_negocio"],
             "telefono_reclamos": datos["telefono_reclamos"],
             "yape_numero": datos["yape_numero"],
@@ -206,7 +208,13 @@ class TicketExtrasDialog(QDialog):
         except Exception:
             logger.exception("No se pudo generar la vista previa del ticket")
             texto = "No se pudo generar la vista previa."
-        self.preview.setPlainText(texto)
+
+        # Si hay QR configurado, se muestra la imagen real en su lugar.
+        contenido_html = ticket_a_html(texto, base.get("qr_yape_path"), self._ancho_papel_px)
+        if contenido_html:
+            self.preview.setHtml(contenido_html)
+        else:
+            self.preview.setPlainText(texto)
 
     def _guardar(self) -> None:
         try:
