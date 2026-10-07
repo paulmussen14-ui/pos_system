@@ -320,7 +320,16 @@ class ConfiguracionPage(QWidget):
 
     # -------------------------------------------------------- Acciones ----
     def _abrir_datos_ticket(self) -> None:
-        dialogo = TicketExtrasDialog(parent=self)
+        # La vista previa usa lo que está escrito ahora en la pestaña
+        # "Negocio" (aunque todavía no se haya guardado) y el QR guardado.
+        config_negocio = {
+            "nombre_negocio": self.input_nombre_negocio.text(),
+            "direccion": self.input_direccion.text(),
+            "moneda": self.combo_moneda.currentText(),
+            "ticket_pie": self.input_ticket_pie.text(),
+            "qr_yape_path": self.config_service.obtener().get("qr_yape_path"),
+        }
+        dialogo = TicketExtrasDialog(config_negocio=config_negocio, parent=self)
         dialogo.exec()
 
     def _seleccionar_logo(self) -> None:

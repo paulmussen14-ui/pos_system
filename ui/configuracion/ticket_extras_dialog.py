@@ -36,9 +36,14 @@ _VENTA_EJEMPLO = {
 
 class TicketExtrasDialog(QDialog):
 
-    def __init__(self, parent=None):
+    def __init__(self, config_negocio: dict | None = None, parent=None):
+        """config_negocio: datos de la pestaña "Negocio" (nombre_negocio,
+        direccion, moneda, ticket_pie, qr_yape_path). Si no se pasan, se leen
+        de la configuración guardada. Así la vista previa muestra el ticket
+        con el nombre, la dirección y el pie reales del negocio."""
         super().__init__(parent)
         self.service = TicketExtrasService()
+        self.config_negocio_base = self._resolver_config_negocio(config_negocio)
         self.setWindowTitle("Datos del ticket")
         self.resize(820, 600)
 
@@ -136,6 +141,23 @@ class TicketExtrasDialog(QDialog):
 
         self._actualizar_preview()
 
+    @staticmethod
+    def _resolver_config_negocio(config_negocio: dict | None) -> dict:
+        base = dict(config_negocio) if config_negocio else {}
+        faltan = any(
+            clave not in base for clave in ("nombre_negocio", "direccion", "moneda", "ticket_pie")
+        )
+        if faltan:
+            try:
+                from services.configuracion_service import ConfiguracionService
+                guardado = ConfiguracionService().obtener()
+            except Exception:
+                logger.exception("No se pudo leer la configuración del negocio para la vista previa")
+                guardado = {}
+            for clave in ("nombre_negocio", "direccion", "moneda", "ticket_pie", "qr_yape_path"):
+                base.setdefault(clave, guardado.get(clave))
+        return base
+
     def _cargar_valores(self) -> None:
         datos = self.service.obtener()
         self.input_telefono_negocio.setText(datos["telefono_negocio"])
@@ -157,10 +179,13 @@ class TicketExtrasDialog(QDialog):
 
     def _actualizar_preview(self) -> None:
         datos = self._leer_formulario()
+        base = self.config_negocio_base
         config = {
-            "nombre_negocio": "Mi Negocio",
-            "moneda": "S/",
-            "ticket_pie": "Gracias por su compra",
+            "nombre_negocio": (base.get("nombre_negocio") or "").strip() or "Mi Negocio",
+            "direccion": (base.get("direccion") or "").strip(),
+            "moneda": base.get("moneda") or "S/",
+            "ticket_pie": base.get("ticket_pie") if base.get("ticket_pie") is not None else "Gracias por su compra",
+            "qr_yape_path": base.get("qr_yape_path") if datos["yape_numero"] else None,
             "telefono": datos["telefono_negocio"],
             "telefono_reclamos": datos["telefono_reclamos"],
             "yape_numero": datos["yape_numero"],
@@ -170,8 +195,14 @@ class TicketExtrasDialog(QDialog):
             # La vista previa usa lo que está escrito ahora, no lo guardado.
             "_sin_datos_extra": True,
         }
+        # Venta de ejemplo con fecha, cliente y dirección del cliente. Si no
+        # hay chofer por defecto, se muestra uno de ejemplo para que se vea
+        # dónde sale el chofer (en una venta real sale el de esa venta).
+        venta = dict(_VENTA_EJEMPLO)
+        if not datos["chofer"]:
+            venta["chofer"] = "Chofer de ejemplo"
         try:
-            texto = generar_texto_ticket(_VENTA_EJEMPLO, config, ANCHO_PREVIEW_CARACTERES)
+            texto = generar_texto_ticket(venta, config, ANCHO_PREVIEW_CARACTERES)
         except Exception:
             logger.exception("No se pudo generar la vista previa del ticket")
             texto = "No se pudo generar la vista previa."
