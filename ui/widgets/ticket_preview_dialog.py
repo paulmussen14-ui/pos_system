@@ -48,10 +48,13 @@ class TicketPreviewDialog(QDialog):
         self.texto.setFont(fuente)
         self.texto.setLineWrapMode(QTextEdit.NoWrap)
 
-        # Si hay QR de Yape configurado, se muestra la imagen real en su lugar.
+        # Si hay logo o QR de Yape configurados, se muestran las imágenes reales.
         ancho_papel_px = QFontMetrics(fuente).horizontalAdvance("0") * ancho_caracteres
         contenido_html = ticket_a_html(
-            self.texto_vista_previa, self.config_negocio.get("qr_yape_path"), ancho_papel_px
+            self.texto_vista_previa,
+            self.config_negocio.get("qr_yape_path"),
+            ancho_papel_px,
+            ruta_logo=self.config_negocio.get("logo_path"),
         )
         if contenido_html:
             self.texto.setHtml(contenido_html)

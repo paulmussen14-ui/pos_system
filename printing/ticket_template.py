@@ -29,6 +29,10 @@ _ESC_POS = {
 # no son texto UTF-8 válido y no pueden vivir dentro de este string.
 MARCADOR_QR_YAPE = "\x00QR_YAPE\x00"
 
+# Igual que MARCADOR_QR_YAPE, pero para el logo del negocio (va arriba del
+# ticket, antes del nombre).
+MARCADOR_LOGO = "\x00LOGO\x00"
+
 
 def ancho_caracteres_por_papel(ancho_papel_mm: int | None) -> int:
     """
@@ -126,6 +130,10 @@ def generar_texto_ticket(
 
     Campos opcionales (solo se imprimen si vienen con valor, así un ticket
     sin ellos queda igual que antes):
+    - config_negocio["logo_path"]: ruta a la imagen del logo, que se imprime
+      arriba del nombre del negocio. En modo esc_pos se inserta el marcador
+      MARCADOR_LOGO (lo reemplaza ticket_printer.py por los bytes de la
+      imagen); en modo texto plano solo se muestra un placeholder "[Logo]".
     - config_negocio["telefono"]: número del negocio.
     - config_negocio["chofer"] o venta["chofer"]: chofer (el de la venta
       tiene prioridad sobre el de la configuración).
@@ -147,6 +155,14 @@ def generar_texto_ticket(
     lineas = []
 
     # --- Encabezado ---
+    if config_negocio.get("logo_path"):
+        if esc_pos:
+            lineas.append(c["align_center"])
+            lineas.append(MARCADOR_LOGO)
+            lineas.append(c["align_left"])
+        else:
+            lineas.append(centrar("[Logo]", ancho_caracteres))
+
     nombre_negocio = config_negocio.get("nombre_negocio", "Mi Negocio")
     if esc_pos:
         lineas.append(c["align_center"] + c["doble_tam"] + c["bold_on"])

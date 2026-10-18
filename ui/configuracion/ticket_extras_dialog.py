@@ -156,7 +156,7 @@ class TicketExtrasDialog(QDialog):
             except Exception:
                 logger.exception("No se pudo leer la configuración del negocio para la vista previa")
                 guardado = {}
-            for clave in ("nombre_negocio", "direccion", "moneda", "ticket_pie", "qr_yape_path"):
+            for clave in ("nombre_negocio", "direccion", "moneda", "ticket_pie", "qr_yape_path", "logo_path"):
                 base.setdefault(clave, guardado.get(clave))
         return base
 
@@ -188,6 +188,7 @@ class TicketExtrasDialog(QDialog):
             "moneda": base.get("moneda") or "S/",
             "ticket_pie": base.get("ticket_pie") if base.get("ticket_pie") is not None else "Gracias por su compra",
             "qr_yape_path": base.get("qr_yape_path"),
+            "logo_path": base.get("logo_path"),
             "telefono": datos["telefono_negocio"],
             "telefono_reclamos": datos["telefono_reclamos"],
             "yape_numero": datos["yape_numero"],
@@ -209,8 +210,10 @@ class TicketExtrasDialog(QDialog):
             logger.exception("No se pudo generar la vista previa del ticket")
             texto = "No se pudo generar la vista previa."
 
-        # Si hay QR configurado, se muestra la imagen real en su lugar.
-        contenido_html = ticket_a_html(texto, base.get("qr_yape_path"), self._ancho_papel_px)
+        # Si hay logo o QR configurados, se muestran las imágenes reales.
+        contenido_html = ticket_a_html(
+            texto, base.get("qr_yape_path"), self._ancho_papel_px, ruta_logo=base.get("logo_path")
+        )
         if contenido_html:
             self.preview.setHtml(contenido_html)
         else:

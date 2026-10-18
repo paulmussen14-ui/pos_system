@@ -12,22 +12,25 @@ poder revisarla, sin romper el flujo de venta.
 Cada venta se puede imprimir en 1 o 2 copias (cliente y control interno) en
 un mismo trabajo de impresión, separadas por el comando de corte de papel.
 
-El texto del ticket puede incluir el marcador MARCADOR_QR_YAPE (ver
-ticket_template.py) donde debe ir la imagen del QR de Yape. Como los bytes
-de una imagen ESC/POS no son texto UTF-8 válido, el trabajo de impresión se
-arma en bytes (no en str): el texto se codifica a UTF-8 y, en el punto del
-marcador, se insertan directamente los bytes del comando de imagen
-generados por printing/qr_yape.py.
+El texto del ticket puede incluir los marcadores MARCADOR_LOGO y
+MARCADOR_QR_YAPE (ver ticket_template.py) donde deben ir la imagen del logo y
+la del QR de Yape. Como los bytes de una imagen ESC/POS no son texto UTF-8
+válido, el trabajo de impresión se arma en bytes (no en str): el texto se
+codifica a la tabla de la impresora y, en el punto de cada marcador, se
+insertan directamente los bytes del comando de imagen generados por
+printing/logo_ticket.py y printing/qr_yape.py.
 """
 
+import re
 import sys
 import unicodedata
 from pathlib import Path
 
 from config import APP_DATA_DIR
 from utils.logger import logger
-from printing.ticket_template import generar_copias_ticket, MARCADOR_QR_YAPE
+from printing.ticket_template import generar_copias_ticket, MARCADOR_QR_YAPE, MARCADOR_LOGO
 from printing.qr_yape import generar_bytes_qr_escpos
+from printing.logo_ticket import generar_bytes_logo_escpos
 
 # --- Codificacion del ticket para la impresora termica ---
 # Las impresoras termicas no entienden UTF-8: usan una "tabla de caracteres".
@@ -101,33 +104,48 @@ def imprimir_ticket_venta(
         _imprimir_windows_bytes(bloques, nombre_impresora)
     else:
         for etiqueta, texto in copias:
-            texto_simulado = texto.replace(MARCADOR_QR_YAPE, "[QR de Yape]")
+            texto_simulado = texto.replace(MARCADOR_QR_YAPE, "[QR de Yape]").replace(MARCADOR_LOGO, "[Logo]")
             _guardar_ticket_simulado(texto_simulado, f"ultimo_ticket_{etiqueta}.txt")
+
+
+def _bytes_imagen(nombre: str, ruta: str | None, generador, ancho_papel_mm: int) -> bytes:
+    """Bytes ESC/POS de una imagen del ticket, o b"" si no hay ruta o si la
+    generación falla (imagen faltante, corrupta, Pillow no instalado, etc.).
+    El error queda en el log: nunca se bloquea la venta por una imagen."""
+    if not ruta:
+        return b""
+    try:
+        return generador(ruta, ancho_papel_mm)
+    except Exception as exc:
+        logger.error(f"No se pudo generar {nombre} para el ticket: {exc}")
+        return b""
 
 
 def _texto_a_bytes(texto: str, config_negocio: dict, ancho_papel_mm: int) -> bytes:
     """
     Codifica el texto del ticket a bytes para la impresora (tabla CP858, ver
-    arriba), reemplazando MARCADOR_QR_YAPE por los bytes reales del comando
-    ESC/POS de imagen del QR de Yape. Cada copia empieza con INICIO_IMPRESORA.
-    Si no hay QR configurado, o si la generacion falla (imagen faltante,
-    corrupta, Pillow no instalado, etc.), el ticket se imprime igual sin el
-    QR y el error queda en el log: nunca se bloquea la venta por esto.
+    arriba), reemplazando MARCADOR_LOGO y MARCADOR_QR_YAPE por los bytes
+    reales del comando ESC/POS de imagen del logo y del QR de Yape. Cada copia
+    empieza con INICIO_IMPRESORA.
+    Si no hay imagen configurada, o si la generación falla, el ticket se
+    imprime igual sin esa imagen y el error queda en el log.
     """
-    ruta_qr = config_negocio.get("qr_yape_path")
-    if not ruta_qr or MARCADOR_QR_YAPE not in texto:
-        return INICIO_IMPRESORA + _codificar(texto.replace(MARCADOR_QR_YAPE, ""))
+    imagenes = {
+        MARCADOR_LOGO: _bytes_imagen(
+            "el logo", config_negocio.get("logo_path"), generar_bytes_logo_escpos, ancho_papel_mm
+        ) if MARCADOR_LOGO in texto else b"",
+        MARCADOR_QR_YAPE: _bytes_imagen(
+            "el QR de Yape", config_negocio.get("qr_yape_path"), generar_bytes_qr_escpos, ancho_papel_mm
+        ) if MARCADOR_QR_YAPE in texto else b"",
+    }
 
-    try:
-        bytes_qr = generar_bytes_qr_escpos(ruta_qr, ancho_papel_mm)
-    except Exception as exc:
-        logger.error(f"No se pudo generar el QR de Yape para el ticket: {exc}")
-        return INICIO_IMPRESORA + _codificar(texto.replace(MARCADOR_QR_YAPE, ""))
-
-    partes = texto.split(MARCADOR_QR_YAPE)
-    resultado = INICIO_IMPRESORA + _codificar(partes[0])
-    for parte in partes[1:]:
-        resultado += bytes_qr + _codificar(parte)
+    patron = "(" + "|".join(re.escape(m) for m in imagenes) + ")"
+    resultado = INICIO_IMPRESORA
+    for parte in re.split(patron, texto):
+        if parte in imagenes:
+            resultado += imagenes[parte]
+        else:
+            resultado += _codificar(parte)
     return resultado
 
 

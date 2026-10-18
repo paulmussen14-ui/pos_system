@@ -17,6 +17,7 @@ from ui.caja.caja_page import CajaPage
 from ui.reportes.reportes_page import ReportesPage
 from ui.configuracion.configuracion_page import ConfiguracionPage
 from services.configuracion_service import ConfiguracionService
+from ui.tema_iconos import componer_tema
 from config import STYLES_DIR, APP_ICON_PATH, APP_LOGO_SIDEBAR_PATH
 
 # Tamaño de la tarjeta que enmarca el logo y alto al que se escala la imagen
@@ -181,7 +182,8 @@ class MainWindow(QMainWindow):
         nombre_archivo = "dark.qss" if tema == "oscuro" else "light.qss"
         ruta = STYLES_DIR / nombre_archivo
         if ruta.exists():
-            self.setStyleSheet(ruta.read_text(encoding="utf-8"))
+            # Tema base + capa de mejoras (ver ui/tema_iconos.py).
+            self.setStyleSheet(componer_tema(ruta.read_text(encoding="utf-8"), tema))
 
     def _cerrar_sesion(self) -> None:
         self.close()

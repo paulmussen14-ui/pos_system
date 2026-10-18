@@ -15,7 +15,10 @@ from PySide6.QtWidgets import (
 from services.configuracion_service import ConfiguracionService
 from services.auth_service import AuthService, AuthError
 from utils.backup_manager import crear_backup, listar_backups, restaurar_backup
-from printing.ticket_printer import listar_impresoras_disponibles
+from config import APP_DATA_DIR
+from printing.ticket_printer import listar_impresoras_disponibles, TicketPrinterError
+from printing.ticket_prueba import imprimir_ticket_de_prueba
+from printing.ticket_template import ancho_caracteres_por_papel
 from ui.configuracion.ticket_extras_dialog import TicketExtrasDialog
 from ui.configuracion.respaldo_acciones import (
     exportar_productos_ui, importar_productos_ui, restaurar_backup_ui,
@@ -80,10 +83,19 @@ class ConfiguracionPage(QWidget):
 
         self.preview_logo = self._crear_preview_vacio()
         btn_logo = QPushButton("Cambiar logo...")
+        btn_logo.setToolTip(
+            "Logo del negocio que se imprime arriba del ticket, antes del "
+            "nombre (si la impresora lo soporta)."
+        )
         btn_logo.clicked.connect(self._seleccionar_logo)
+        self.btn_quitar_logo = QPushButton("Quitar")
+        self.btn_quitar_logo.setProperty("class", "danger")
+        self.btn_quitar_logo.setToolTip("Quita el logo: ya no se imprimirá en el ticket.")
+        self.btn_quitar_logo.clicked.connect(self._quitar_logo)
         fila_logo = QHBoxLayout()
         fila_logo.addWidget(self.preview_logo)
         fila_logo.addWidget(btn_logo)
+        fila_logo.addWidget(self.btn_quitar_logo)
         fila_logo.addStretch()
         form.addRow("Logo:", fila_logo)
 
@@ -94,9 +106,14 @@ class ConfiguracionPage(QWidget):
             "número de Yape (si la impresora lo soporta)."
         )
         btn_qr_yape.clicked.connect(self._seleccionar_qr_yape)
+        self.btn_quitar_qr_yape = QPushButton("Quitar")
+        self.btn_quitar_qr_yape.setProperty("class", "danger")
+        self.btn_quitar_qr_yape.setToolTip("Quita el QR de Yape: ya no se imprimirá en el ticket.")
+        self.btn_quitar_qr_yape.clicked.connect(self._quitar_qr_yape)
         fila_qr = QHBoxLayout()
         fila_qr.addWidget(self.preview_qr_yape)
         fila_qr.addWidget(btn_qr_yape)
+        fila_qr.addWidget(self.btn_quitar_qr_yape)
         fila_qr.addStretch()
         form.addRow("QR de Yape:", fila_qr)
 
@@ -134,6 +151,18 @@ class ConfiguracionPage(QWidget):
         btn_guardar = QPushButton("Guardar cambios")
         btn_guardar.clicked.connect(self._guardar_impresion)
         form.addRow(btn_guardar)
+
+        # Ticket de ejemplo para comprobar la impresora (logo, QR y acentos)
+        # sin registrar ninguna venta.
+        btn_prueba = QPushButton("Imprimir prueba")
+        btn_prueba.setProperty("class", "secondary")
+        btn_prueba.setToolTip(
+            "Imprime un ticket de ejemplo con tu logo, tu QR y letras con acento, "
+            "usando lo que está elegido arriba (aunque todavía no hayas guardado). "
+            "No registra ninguna venta."
+        )
+        btn_prueba.clicked.connect(self._imprimir_prueba)
+        form.addRow("Probar impresora:", btn_prueba)
 
         # Textos que salen en el ticket: reclamos, devolución, Yape, chofer.
         # Se guardan por separado (ventana propia), no con "Guardar cambios".
@@ -258,8 +287,7 @@ class ConfiguracionPage(QWidget):
         if idx_tema >= 0:
             self.combo_tema.setCurrentIndex(idx_tema)
 
-        self._actualizar_preview(self.preview_logo, config.get("logo_path"))
-        self._actualizar_preview(self.preview_qr_yape, config.get("qr_yape_path"))
+        self._refrescar_imagenes(config)
 
         config_impresion = self.config_service.obtener_config_impresion()
         idx_tipo = self.combo_tipo_impresora.findText(config_impresion.get("tipo_impresora", "termica_58mm"))
@@ -295,6 +323,17 @@ class ConfiguracionPage(QWidget):
         preview.setText("Sin\nimagen")
         return preview
 
+    def _refrescar_imagenes(self, config: dict | None = None) -> None:
+        """Actualiza las miniaturas del logo y del QR, y deja habilitado el
+        botón "Quitar" solo si hay una imagen guardada."""
+        config = config if config is not None else self.config_service.obtener()
+        ruta_logo = config.get("logo_path")
+        ruta_qr = config.get("qr_yape_path")
+        self._actualizar_preview(self.preview_logo, ruta_logo)
+        self._actualizar_preview(self.preview_qr_yape, ruta_qr)
+        self.btn_quitar_logo.setEnabled(bool(ruta_logo))
+        self.btn_quitar_qr_yape.setEnabled(bool(ruta_qr))
+
     def _actualizar_preview(self, preview: QLabel, ruta: str | None) -> None:
         """
         Muestra la miniatura de ruta en preview, o "Sin imagen"/"No se
@@ -321,13 +360,15 @@ class ConfiguracionPage(QWidget):
     # -------------------------------------------------------- Acciones ----
     def _abrir_datos_ticket(self) -> None:
         # La vista previa usa lo que está escrito ahora en la pestaña
-        # "Negocio" (aunque todavía no se haya guardado) y el QR guardado.
+        # "Negocio" (aunque todavía no se haya guardado) y el logo y el QR guardados.
+        guardado = self.config_service.obtener()
         config_negocio = {
             "nombre_negocio": self.input_nombre_negocio.text(),
             "direccion": self.input_direccion.text(),
             "moneda": self.combo_moneda.currentText(),
             "ticket_pie": self.input_ticket_pie.text(),
-            "qr_yape_path": self.config_service.obtener().get("qr_yape_path"),
+            "qr_yape_path": guardado.get("qr_yape_path"),
+            "logo_path": guardado.get("logo_path"),
         }
         dialogo = TicketExtrasDialog(config_negocio=config_negocio, parent=self)
         dialogo.exec()
@@ -338,11 +379,22 @@ class ConfiguracionPage(QWidget):
             return
         try:
             self.config_service.actualizar_logo(ruta)
-        except ValueError as e:
+        except (ValueError, OSError) as e:
             QMessageBox.warning(self, "No se pudo actualizar el logo", str(e))
             return
-        self._actualizar_preview(self.preview_logo, self.config_service.obtener().get("logo_path"))
+        self._refrescar_imagenes()
         QMessageBox.information(self, "Logo actualizado", "El logo se actualizó correctamente.")
+
+    def _quitar_logo(self) -> None:
+        if not self._confirmar_quitar_imagen("el logo"):
+            return
+        try:
+            self.config_service.quitar_logo()
+        except Exception as e:
+            QMessageBox.warning(self, "No se pudo quitar el logo", str(e))
+            return
+        self._refrescar_imagenes()
+        QMessageBox.information(self, "Logo quitado", "El logo se quitó. Ya no se imprimirá en el ticket.")
 
     def _seleccionar_qr_yape(self) -> None:
         ruta, _ = QFileDialog.getOpenFileName(self, "Seleccionar QR de Yape", "", "Imágenes (*.png *.jpg *.jpeg)")
@@ -350,11 +402,35 @@ class ConfiguracionPage(QWidget):
             return
         try:
             self.config_service.actualizar_qr_yape(ruta)
-        except ValueError as e:
+        except (ValueError, OSError) as e:
             QMessageBox.warning(self, "No se pudo actualizar el QR", str(e))
             return
-        self._actualizar_preview(self.preview_qr_yape, self.config_service.obtener().get("qr_yape_path"))
+        self._refrescar_imagenes()
         QMessageBox.information(self, "QR actualizado", "El QR de Yape se actualizó correctamente.")
+
+    def _quitar_qr_yape(self) -> None:
+        if not self._confirmar_quitar_imagen("el QR de Yape"):
+            return
+        try:
+            self.config_service.quitar_qr_yape()
+        except Exception as e:
+            QMessageBox.warning(self, "No se pudo quitar el QR", str(e))
+            return
+        self._refrescar_imagenes()
+        QMessageBox.information(self, "QR quitado", "El QR de Yape se quitó. Ya no se imprimirá en el ticket.")
+
+    def _confirmar_quitar_imagen(self, nombre: str) -> bool:
+        """Pregunta antes de quitar una imagen: el archivo guardado se borra y
+        habría que volver a cargarlo para recuperarla."""
+        respuesta = QMessageBox.question(
+            self,
+            "Quitar imagen",
+            f"¿Quitar {nombre}?\n\nYa no se imprimirá en el ticket y se borrará la "
+            "imagen guardada. Para volver a usarlo tendrás que cargarlo otra vez.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return respuesta == QMessageBox.Yes
 
     def _guardar_negocio(self) -> None:
         self.config_service.actualizar(
@@ -375,6 +451,45 @@ class ConfiguracionPage(QWidget):
             self.check_dos_copias.isChecked(),
         )
         QMessageBox.information(self, "Guardado", "Configuración de impresión actualizada.")
+
+    def _imprimir_prueba(self) -> None:
+        """Imprime un ticket de ejemplo con lo que está elegido en el formulario
+        (tipo de papel, impresora, activa), sin necesidad de guardar antes."""
+        tipo = self.combo_tipo_impresora.currentText()
+        ancho_caracteres = ancho_caracteres_por_papel(58 if "58" in tipo else 80)
+        nombre = self.combo_nombre_impresora.currentText().strip()
+        # Igual que al vender: sin "Impresión activa" (o sin impresora) no se imprime.
+        nombre_impresora = nombre if (self.check_impresion_activa.isChecked() and nombre) else None
+
+        guardado = self.config_service.obtener()
+        config_negocio = {
+            "nombre_negocio": self.input_nombre_negocio.text().strip() or "Mi Negocio",
+            "direccion": self.input_direccion.text().strip(),
+            "moneda": self.combo_moneda.currentText(),
+            "ticket_pie": self.input_ticket_pie.text(),
+            "logo_path": guardado.get("logo_path"),
+            "qr_yape_path": guardado.get("qr_yape_path"),
+        }
+        try:
+            imprimir_ticket_de_prueba(config_negocio, ancho_caracteres, nombre_impresora)
+        except TicketPrinterError as e:
+            QMessageBox.warning(self, "Error al imprimir", str(e))
+            return
+
+        if nombre_impresora is None:
+            QMessageBox.information(
+                self,
+                "Sin impresora activa",
+                "Para imprimir, marca \"Impresión activa\" y elige la impresora de Windows.\n\n"
+                f"El ticket de prueba se guardó como archivo de texto en:\n{APP_DATA_DIR / 'ultimo_ticket_unica.txt'}",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Prueba enviada",
+                f"Se envió el ticket de prueba a \"{nombre_impresora}\".\n\n"
+                "Revisa que salgan bien el logo, el QR y las letras con acento (áéíóú ñ ¿ ¡).",
+            )
 
     def _agregar_metodo_pago(self) -> None:
         nombre = self.input_nuevo_metodo.text().strip()

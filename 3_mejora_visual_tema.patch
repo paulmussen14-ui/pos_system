@@ -1,0 +1,737 @@
+diff --git a/resources/styles/mejoras_claro.qss b/resources/styles/mejoras_claro.qss
+new file mode 100644
+index 0000000..bd32568
+--- /dev/null
++++ b/resources/styles/mejoras_claro.qss
+@@ -0,0 +1,293 @@
++/* ===== Mejoras visuales del tema claro =====
++   Esta capa se aplica DESPUÉS de light.qss (ver ui/tema_iconos.py): lo que se
++   repite aquí manda sobre light.qss, y lo que no está aquí queda como estaba.
++   Los marcadores de ícono (nombre entre dobles llaves) los reemplaza
++   ui/tema_iconos.py por la ruta de cada ícono.
++   Para quitar las mejoras basta con borrar este archivo. */
++
++/* --- Botones: mismo alto en todos y borde que los hace parejos --- */
++QPushButton {
++    border: 1px solid transparent;
++    min-height: 20px;
++}
++
++QPushButton.secondary {
++    border: 1px solid #d1d5db;
++}
++
++QPushButton.secondary:hover {
++    border-color: #9ca3af;
++}
++
++QPushButton:disabled {
++    border-color: transparent;
++}
++
++QMessageBox QPushButton {
++    min-width: 84px;
++}
++
++/* --- Campos de texto, listas desplegables y números --- */
++QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QTextEdit {
++    min-height: 20px;
++    placeholder-text-color: #9ca3af;
++}
++
++QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QDateEdit:hover, QTextEdit:hover {
++    border: 1px solid #9ca3af;
++}
++
++/* :focus va después de :hover para que el azul gane cuando están los dos */
++QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QTextEdit:focus {
++    border: 1px solid #2563eb;
++}
++
++QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QDateEdit:disabled, QTextEdit:disabled {
++    border: 1px solid #e5e7eb;
++}
++
++QComboBox::drop-down, QDateEdit::drop-down {
++    subcontrol-origin: padding;
++    subcontrol-position: center right;
++    width: 28px;
++    border: none;
++}
++
++QComboBox::down-arrow, QDateEdit::down-arrow {
++    image: url("{{ICONO_FLECHA_ABAJO}}");
++    width: 12px;
++    height: 12px;
++}
++
++QComboBox QAbstractItemView {
++    padding: 4px;
++    border-radius: 6px;
++}
++
++/* El campo de texto que Qt mete dentro de los numéricos, fechas y listas
++   editables no debe dibujar su propio borde ni relleno (si no, el texto queda
++   pegado al borde y se ve un recuadro dentro de otro). */
++QSpinBox QLineEdit, QDoubleSpinBox QLineEdit, QDateEdit QLineEdit, QComboBox QLineEdit {
++    background-color: transparent;
++    border: none;
++    padding: 0px;
++    min-height: 0px;
++}
++
++/* Campos numéricos: los botones de subir/bajar con su flecha */
++QSpinBox::up-button, QDoubleSpinBox::up-button {
++    subcontrol-origin: border;
++    subcontrol-position: top right;
++    width: 22px;
++    background-color: transparent;
++    border: none;
++    border-left: 1px solid #e5e7eb;
++    border-top-right-radius: 5px;
++}
++
++QSpinBox::down-button, QDoubleSpinBox::down-button {
++    subcontrol-origin: border;
++    subcontrol-position: bottom right;
++    width: 22px;
++    background-color: transparent;
++    border: none;
++    border-left: 1px solid #e5e7eb;
++    border-bottom-right-radius: 5px;
++}
++
++QSpinBox::up-button:hover, QSpinBox::down-button:hover,
++QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
++    background-color: #eef2f7;
++}
++
++QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
++    image: url("{{ICONO_FLECHA_ARRIBA}}");
++    width: 10px;
++    height: 10px;
++}
++
++QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
++    image: url("{{ICONO_FLECHA_ABAJO}}");
++    width: 10px;
++    height: 10px;
++}
++
++/* --- Checkboxes (cuadrados con palomita) y radios (redondos con punto) --- */
++QCheckBox::indicator, QRadioButton::indicator {
++    width: 16px;
++    height: 16px;
++    border: 1px solid #9ca3af;
++    background-color: #ffffff;
++}
++
++QCheckBox::indicator {
++    border-radius: 5px;
++}
++
++QRadioButton::indicator {
++    border-radius: 9px;
++}
++
++QCheckBox::indicator:hover, QRadioButton::indicator:hover {
++    border-color: #2563eb;
++}
++
++QCheckBox::indicator:checked {
++    background-color: #2563eb;
++    border: 1px solid #2563eb;
++    image: url("{{ICONO_PALOMITA}}");
++}
++
++QRadioButton::indicator:checked {
++    background-color: #2563eb;
++    border: 1px solid #2563eb;
++    image: url("{{ICONO_PUNTO}}");
++}
++
++QCheckBox::indicator:checked:hover, QRadioButton::indicator:checked:hover {
++    background-color: #1d4ed8;
++    border-color: #1d4ed8;
++}
++
++QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
++    background-color: #f3f4f6;
++    border-color: #e5e7eb;
++}
++
++QCheckBox:disabled, QRadioButton:disabled {
++    color: #9ca3af;
++}
++
++/* --- Tablas --- */
++QTableWidget, QTableView {
++    outline: 0;
++    gridline-color: #eef0f3;
++    alternate-background-color: #f9fafb;
++}
++
++QTableWidget::item, QTableView::item {
++    padding: 6px 8px;
++    border: none;
++}
++
++QTableWidget::item:hover, QTableView::item:hover {
++    background-color: #f3f4f6;
++}
++
++QTableWidget::item:selected, QTableView::item:selected {
++    background-color: #dbeafe;
++    color: #1f2430;
++}
++
++/* La selección se sigue viendo aunque la tabla pierda el foco */
++QTableWidget::item:selected:!active, QTableView::item:selected:!active {
++    background-color: #dbeafe;
++    color: #1f2430;
++}
++
++/* El fondo del encabezado (también el hueco bajo los números de fila) */
++QHeaderView {
++    background-color: #f9fafb;
++    border: none;
++}
++
++QHeaderView::section {
++    background-color: #f9fafb;
++    color: #4b5563;
++    padding: 10px 8px;
++    border: none;
++    border-bottom: 2px solid #2563eb;
++    font-size: 12px;
++    font-weight: 600;
++}
++
++QHeaderView::section:horizontal:first {
++    border-top-left-radius: 7px;
++}
++
++QHeaderView::section:horizontal:last {
++    border-top-right-radius: 7px;
++}
++
++QHeaderView::section:vertical {
++    padding: 4px 8px;
++    border: none;
++    border-bottom: 1px solid #eef0f3;
++    border-right: 1px solid #eef0f3;
++}
++
++QTableCornerButton::section {
++    background-color: #f9fafb;
++    border: none;
++    border-bottom: 2px solid #2563eb;
++}
++
++/* --- Pestañas: la activa lleva una línea azul --- */
++QTabBar::tab {
++    padding: 9px 18px;
++    margin-right: 2px;
++    border-bottom: 2px solid transparent;
++}
++
++QTabBar::tab:hover:!selected {
++    background-color: #e9edf3;
++    color: #1f2430;
++}
++
++QTabBar::tab:selected {
++    border-bottom: 2px solid #2563eb;
++}
++
++/* --- Menú lateral: botones en forma de píldora --- */
++QWidget#sidebar QPushButton {
++    margin: 2px 12px;
++    padding: 10px 14px;
++    border-radius: 8px;
++}
++
++/* --- Barras de desplazamiento --- */
++QScrollBar::add-page, QScrollBar::sub-page {
++    background: transparent;
++}
++
++QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
++    background: #94a3b8;
++}
++
++QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed {
++    background: #64748b;
++}
++
++/* --- Etiquetas de estado en forma de píldora --- */
++QLabel.badgeOk, QLabel.badgeWarning, QLabel.badgeDanger {
++    border-radius: 9px;
++    padding: 2px 10px;
++}
++
++/* --- Calendario que se abre desde los campos de fecha --- */
++QCalendarWidget QWidget {
++    background-color: #ffffff;
++    alternate-background-color: #ffffff;
++    color: #1f2430;
++}
++
++QCalendarWidget QToolButton {
++    background-color: transparent;
++    color: #1f2430;
++    border-radius: 6px;
++    padding: 4px 8px;
++}
++
++QCalendarWidget QToolButton:hover {
++    background-color: #e5e7eb;
++}
++
++QCalendarWidget QAbstractItemView:enabled {
++    selection-background-color: #2563eb;
++    selection-color: #ffffff;
++    outline: 0;
++}
++
++QCalendarWidget QAbstractItemView:disabled {
++    color: #9ca3af;
++}
+diff --git a/resources/styles/mejoras_oscuro.qss b/resources/styles/mejoras_oscuro.qss
+new file mode 100644
+index 0000000..4b5ee7b
+--- /dev/null
++++ b/resources/styles/mejoras_oscuro.qss
+@@ -0,0 +1,293 @@
++/* ===== Mejoras visuales del tema oscuro =====
++   Esta capa se aplica DESPUÉS de dark.qss (ver ui/tema_iconos.py): lo que se
++   repite aquí manda sobre dark.qss, y lo que no está aquí queda como estaba.
++   Los marcadores de ícono (nombre entre dobles llaves) los reemplaza
++   ui/tema_iconos.py por la ruta de cada ícono.
++   Para quitar las mejoras basta con borrar este archivo. */
++
++/* --- Botones: mismo alto en todos y borde que los hace parejos --- */
++QPushButton {
++    border: 1px solid transparent;
++    min-height: 20px;
++}
++
++QPushButton.secondary {
++    border: 1px solid #4b5563;
++}
++
++QPushButton.secondary:hover {
++    border-color: #6b7280;
++}
++
++QPushButton:disabled {
++    border-color: transparent;
++}
++
++QMessageBox QPushButton {
++    min-width: 84px;
++}
++
++/* --- Campos de texto, listas desplegables y números --- */
++QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QTextEdit {
++    min-height: 20px;
++    placeholder-text-color: #6b7280;
++}
++
++QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QDateEdit:hover, QTextEdit:hover {
++    border: 1px solid #6b7280;
++}
++
++/* :focus va después de :hover para que el azul gane cuando están los dos */
++QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QTextEdit:focus {
++    border: 1px solid #3b82f6;
++}
++
++QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QDateEdit:disabled, QTextEdit:disabled {
++    border: 1px solid #374151;
++}
++
++QComboBox::drop-down, QDateEdit::drop-down {
++    subcontrol-origin: padding;
++    subcontrol-position: center right;
++    width: 28px;
++    border: none;
++}
++
++QComboBox::down-arrow, QDateEdit::down-arrow {
++    image: url("{{ICONO_FLECHA_ABAJO}}");
++    width: 12px;
++    height: 12px;
++}
++
++QComboBox QAbstractItemView {
++    padding: 4px;
++    border-radius: 6px;
++}
++
++/* El campo de texto que Qt mete dentro de los numéricos, fechas y listas
++   editables no debe dibujar su propio borde ni relleno (si no, el texto queda
++   pegado al borde y se ve un recuadro dentro de otro). */
++QSpinBox QLineEdit, QDoubleSpinBox QLineEdit, QDateEdit QLineEdit, QComboBox QLineEdit {
++    background-color: transparent;
++    border: none;
++    padding: 0px;
++    min-height: 0px;
++}
++
++/* Campos numéricos: los botones de subir/bajar con su flecha */
++QSpinBox::up-button, QDoubleSpinBox::up-button {
++    subcontrol-origin: border;
++    subcontrol-position: top right;
++    width: 22px;
++    background-color: transparent;
++    border: none;
++    border-left: 1px solid #374151;
++    border-top-right-radius: 5px;
++}
++
++QSpinBox::down-button, QDoubleSpinBox::down-button {
++    subcontrol-origin: border;
++    subcontrol-position: bottom right;
++    width: 22px;
++    background-color: transparent;
++    border: none;
++    border-left: 1px solid #374151;
++    border-bottom-right-radius: 5px;
++}
++
++QSpinBox::up-button:hover, QSpinBox::down-button:hover,
++QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
++    background-color: #374151;
++}
++
++QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
++    image: url("{{ICONO_FLECHA_ARRIBA}}");
++    width: 10px;
++    height: 10px;
++}
++
++QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
++    image: url("{{ICONO_FLECHA_ABAJO}}");
++    width: 10px;
++    height: 10px;
++}
++
++/* --- Checkboxes (cuadrados con palomita) y radios (redondos con punto) --- */
++QCheckBox::indicator, QRadioButton::indicator {
++    width: 16px;
++    height: 16px;
++    border: 1px solid #6b7280;
++    background-color: #1f2937;
++}
++
++QCheckBox::indicator {
++    border-radius: 5px;
++}
++
++QRadioButton::indicator {
++    border-radius: 9px;
++}
++
++QCheckBox::indicator:hover, QRadioButton::indicator:hover {
++    border-color: #3b82f6;
++}
++
++QCheckBox::indicator:checked {
++    background-color: #2563eb;
++    border: 1px solid #2563eb;
++    image: url("{{ICONO_PALOMITA}}");
++}
++
++QRadioButton::indicator:checked {
++    background-color: #2563eb;
++    border: 1px solid #2563eb;
++    image: url("{{ICONO_PUNTO}}");
++}
++
++QCheckBox::indicator:checked:hover, QRadioButton::indicator:checked:hover {
++    background-color: #3b82f6;
++    border-color: #3b82f6;
++}
++
++QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
++    background-color: #161e2c;
++    border-color: #374151;
++}
++
++QCheckBox:disabled, QRadioButton:disabled {
++    color: #6b7280;
++}
++
++/* --- Tablas --- */
++QTableWidget, QTableView {
++    outline: 0;
++    gridline-color: #283548;
++    alternate-background-color: #222d3e;
++}
++
++QTableWidget::item, QTableView::item {
++    padding: 6px 8px;
++    border: none;
++}
++
++QTableWidget::item:hover, QTableView::item:hover {
++    background-color: #263349;
++}
++
++QTableWidget::item:selected, QTableView::item:selected {
++    background-color: #1e3a8a;
++    color: #ffffff;
++}
++
++/* La selección se sigue viendo aunque la tabla pierda el foco */
++QTableWidget::item:selected:!active, QTableView::item:selected:!active {
++    background-color: #1e3a8a;
++    color: #ffffff;
++}
++
++/* El fondo del encabezado (también el hueco bajo los números de fila) */
++QHeaderView {
++    background-color: #111827;
++    border: none;
++}
++
++QHeaderView::section {
++    background-color: #111827;
++    color: #9ca3af;
++    padding: 10px 8px;
++    border: none;
++    border-bottom: 2px solid #2563eb;
++    font-size: 12px;
++    font-weight: 600;
++}
++
++QHeaderView::section:horizontal:first {
++    border-top-left-radius: 7px;
++}
++
++QHeaderView::section:horizontal:last {
++    border-top-right-radius: 7px;
++}
++
++QHeaderView::section:vertical {
++    padding: 4px 8px;
++    border: none;
++    border-bottom: 1px solid #283548;
++    border-right: 1px solid #283548;
++}
++
++QTableCornerButton::section {
++    background-color: #111827;
++    border: none;
++    border-bottom: 2px solid #2563eb;
++}
++
++/* --- Pestañas: la activa lleva una línea azul --- */
++QTabBar::tab {
++    padding: 9px 18px;
++    margin-right: 2px;
++    border-bottom: 2px solid transparent;
++}
++
++QTabBar::tab:hover:!selected {
++    background-color: #1a2332;
++    color: #e5e7eb;
++}
++
++QTabBar::tab:selected {
++    border-bottom: 2px solid #3b82f6;
++}
++
++/* --- Menú lateral: botones en forma de píldora --- */
++QWidget#sidebar QPushButton {
++    margin: 2px 12px;
++    padding: 10px 14px;
++    border-radius: 8px;
++}
++
++/* --- Barras de desplazamiento --- */
++QScrollBar::add-page, QScrollBar::sub-page {
++    background: transparent;
++}
++
++QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
++    background: #6b7280;
++}
++
++QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed {
++    background: #9ca3af;
++}
++
++/* --- Etiquetas de estado en forma de píldora --- */
++QLabel.badgeOk, QLabel.badgeWarning, QLabel.badgeDanger {
++    border-radius: 9px;
++    padding: 2px 10px;
++}
++
++/* --- Calendario que se abre desde los campos de fecha --- */
++QCalendarWidget QWidget {
++    background-color: #1f2937;
++    alternate-background-color: #1f2937;
++    color: #e5e7eb;
++}
++
++QCalendarWidget QToolButton {
++    background-color: transparent;
++    color: #e5e7eb;
++    border-radius: 6px;
++    padding: 4px 8px;
++}
++
++QCalendarWidget QToolButton:hover {
++    background-color: #374151;
++}
++
++QCalendarWidget QAbstractItemView:enabled {
++    selection-background-color: #2563eb;
++    selection-color: #ffffff;
++    outline: 0;
++}
++
++QCalendarWidget QAbstractItemView:disabled {
++    color: #6b7280;
++}
+diff --git a/ui/main_window.py b/ui/main_window.py
+index 4c26eb6..59f8a21 100644
+--- a/ui/main_window.py
++++ b/ui/main_window.py
+@@ -17,6 +17,7 @@ from ui.caja.caja_page import CajaPage
+ from ui.reportes.reportes_page import ReportesPage
+ from ui.configuracion.configuracion_page import ConfiguracionPage
+ from services.configuracion_service import ConfiguracionService
++from ui.tema_iconos import componer_tema
+ from config import STYLES_DIR, APP_ICON_PATH, APP_LOGO_SIDEBAR_PATH
+ 
+ # Tamaño de la tarjeta que enmarca el logo y alto al que se escala la imagen
+@@ -181,7 +182,8 @@ class MainWindow(QMainWindow):
+         nombre_archivo = "dark.qss" if tema == "oscuro" else "light.qss"
+         ruta = STYLES_DIR / nombre_archivo
+         if ruta.exists():
+-            self.setStyleSheet(ruta.read_text(encoding="utf-8"))
++            # Tema base + capa de mejoras (ver ui/tema_iconos.py).
++            self.setStyleSheet(componer_tema(ruta.read_text(encoding="utf-8"), tema))
+ 
+     def _cerrar_sesion(self) -> None:
+         self.close()
+diff --git a/ui/tema_iconos.py b/ui/tema_iconos.py
+new file mode 100644
+index 0000000..1fbbc6a
+--- /dev/null
++++ b/ui/tema_iconos.py
+@@ -0,0 +1,111 @@
++"""Tema visual: une el tema base (light.qss / dark.qss) con la capa de mejoras
++(mejoras_claro.qss / mejoras_oscuro.qss) y dibuja los íconos pequeños que esa
++capa necesita (palomita de los checkbox, punto de los radio, flechas de los
++desplegables y de los campos numéricos).
++
++Los íconos se dibujan con Qt al aplicar el tema y se guardan como PNG en
++APP_DATA_DIR/iconos_tema (el QSS solo puede apuntar a archivos). Así no hay
++imágenes que empaquetar y los colores siempre coinciden con el tema.
++
++La capa de mejoras va DESPUÉS del tema base: si una regla se repite, gana la
++de la capa; y lo que la capa no toca, se queda como está en el tema base.
++Si algo falla (falta el archivo de la capa, no se pueden dibujar los íconos),
++se usa solo el tema base y el error queda en el log.
++"""
++
++from pathlib import Path
++
++from PySide6.QtCore import Qt, QPointF, QRectF
++from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
++
++from config import APP_DATA_DIR, STYLES_DIR
++from utils.logger import logger
++
++CARPETA_ICONOS = APP_DATA_DIR / "iconos_tema"
++
++# Color de las flechas según el tema (gris que se lee bien sobre el fondo de los campos).
++COLOR_FLECHA = {"claro": "#6b7280", "oscuro": "#9ca3af"}
++
++TAM_PALOMITA = 16   # = ancho/alto del indicador de checkbox/radio en la capa
++TAM_FLECHA = 12
++
++
++def _trazo(color: str, grosor: float) -> QPen:
++    pen = QPen(QColor(color), grosor)
++    pen.setCapStyle(Qt.RoundCap)
++    pen.setJoinStyle(Qt.RoundJoin)
++    return pen
++
++
++def _dibujar_palomita(p: QPainter, s: int) -> None:
++    p.setPen(_trazo("#ffffff", 2.0))
++    ruta = QPainterPath(QPointF(s * 0.25, s * 0.53))
++    ruta.lineTo(s * 0.43, s * 0.70)
++    ruta.lineTo(s * 0.76, s * 0.32)
++    p.drawPath(ruta)
++
++
++def _dibujar_punto(p: QPainter, s: int) -> None:
++    p.setPen(Qt.NoPen)
++    p.setBrush(QColor("#ffffff"))
++    radio = s * 0.22
++    p.drawEllipse(QRectF(s / 2 - radio, s / 2 - radio, radio * 2, radio * 2))
++
++
++def _flecha(color: str, hacia_abajo: bool):
++    def dibujar(p: QPainter, s: int) -> None:
++        p.setPen(_trazo(color, 1.7))
++        y_borde, y_punta = (s * 0.36, s * 0.64) if hacia_abajo else (s * 0.64, s * 0.36)
++        ruta = QPainterPath(QPointF(s * 0.24, y_borde))
++        ruta.lineTo(s * 0.50, y_punta)
++        ruta.lineTo(s * 0.76, y_borde)
++        p.drawPath(ruta)
++    return dibujar
++
++
++def _guardar_icono(nombre: str, tam: int, dibujar) -> Path:
++    """Guarda nombre.png (tam x tam) y nombre@2x.png (para pantallas con escala
++    alta; Qt elige solo el que corresponde)."""
++    for factor, sufijo in ((1, ""), (2, "@2x")):
++        imagen = QPixmap(tam * factor, tam * factor)
++        imagen.fill(Qt.transparent)
++        pintor = QPainter(imagen)
++        pintor.setRenderHint(QPainter.Antialiasing, True)
++        pintor.scale(factor, factor)
++        dibujar(pintor, tam)
++        pintor.end()
++        if not imagen.save(str(CARPETA_ICONOS / f"{nombre}{sufijo}.png"), "PNG"):
++            raise OSError(f"No se pudo guardar el ícono {nombre}{sufijo}.png en {CARPETA_ICONOS}")
++    return CARPETA_ICONOS / f"{nombre}.png"
++
++
++def preparar_iconos(tema: str) -> dict[str, str]:
++    """Dibuja los íconos del tema y devuelve {marcador del QSS: ruta del PNG}."""
++    CARPETA_ICONOS.mkdir(parents=True, exist_ok=True)
++    color = COLOR_FLECHA.get(tema, COLOR_FLECHA["claro"])
++    sufijo = "oscuro" if tema == "oscuro" else "claro"
++    rutas = {
++        "{{ICONO_PALOMITA}}": _guardar_icono("palomita", TAM_PALOMITA, _dibujar_palomita),
++        "{{ICONO_PUNTO}}": _guardar_icono("punto", TAM_PALOMITA, _dibujar_punto),
++        "{{ICONO_FLECHA_ABAJO}}": _guardar_icono(f"flecha_abajo_{sufijo}", TAM_FLECHA, _flecha(color, True)),
++        "{{ICONO_FLECHA_ARRIBA}}": _guardar_icono(f"flecha_arriba_{sufijo}", TAM_FLECHA, _flecha(color, False)),
++    }
++    # En el QSS las rutas van con "/" aunque sea Windows, y entre comillas (soporta espacios).
++    return {marcador: ruta.as_posix() for marcador, ruta in rutas.items()}
++
++
++def componer_tema(qss_base: str, tema: str) -> str:
++    """Devuelve el QSS completo: el tema base más la capa de mejoras (con las
++    rutas de los íconos ya puestas). Si no se puede, devuelve solo el tema base."""
++    nombre = "mejoras_oscuro.qss" if tema == "oscuro" else "mejoras_claro.qss"
++    ruta = STYLES_DIR / nombre
++    if not ruta.is_file():
++        return qss_base
++    try:
++        mejoras = ruta.read_text(encoding="utf-8")
++        for marcador, ruta_icono in preparar_iconos(tema).items():
++            mejoras = mejoras.replace(marcador, ruta_icono)
++    except Exception:
++        logger.exception("No se pudo aplicar la capa de mejoras del tema; se usa el tema base")
++        return qss_base
++    return qss_base + "\n\n" + mejoras

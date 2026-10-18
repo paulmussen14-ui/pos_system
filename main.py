@@ -21,6 +21,8 @@ from ui.login.setup_admin_window import SetupAdminWindow
 from ui.login.login_window import LoginWindow
 from ui.login.recovery_window import RecoveryWindow
 from ui.main_window import MainWindow
+from ui.widgets.aviso_datos_antiguos import mostrar_aviso_si_corresponde
+from services.configuracion_service import ConfiguracionService
 from utils.logger import logger
 from utils.retencion import ejecutar_retencion_diaria
 from config import APP_ICON_PATH, APP_LOGO_PATH
@@ -72,6 +74,9 @@ class AppController:
         ventana = MainWindow(usuario, cerrar_sesion_callback=self._mostrar_login)
         self._reemplazar_ventana(ventana)
         ventana.showMaximized()
+        # Si hay datos en la carpeta de datos antigua, se avisa (una sola vez
+        # por cada estado de esa carpeta). Se hace con la ventana ya visible.
+        QTimer.singleShot(600, lambda: mostrar_aviso_si_corresponde(ventana))
 
     def _reemplazar_ventana(self, nueva_ventana) -> None:
         if self.ventana_actual is not None:
@@ -79,6 +84,15 @@ class AppController:
         self.ventana_actual = nueva_ventana
         if not isinstance(nueva_ventana, MainWindow):
             nueva_ventana.show()
+
+
+def _reparar_imagenes_guardadas() -> None:
+    """Reconecta el logo y el QR de Yape con su archivo si la base perdió la
+    ruta (ver ConfiguracionService.reparar_rutas_imagenes). Nunca rompe el arranque."""
+    try:
+        ConfiguracionService().reparar_rutas_imagenes()
+    except Exception:
+        logger.exception("No se pudieron reparar las rutas del logo / QR")
 
 
 def _crear_splash() -> QSplashScreen | None:
@@ -125,6 +139,7 @@ def main() -> None:
 
     try:
         get_db()  # fuerza inicialización de la base de datos al arrancar
+        _reparar_imagenes_guardadas()
         if splash:
             splash.showMessage(
                 "Limpiando registros antiguos...",
