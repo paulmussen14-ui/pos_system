@@ -16,47 +16,11 @@ from utils.validators import formatear_moneda
 from utils.worker import Worker
 from utils.logger import logger
 
-# Mismo estilo de tabla usado en Ventas y Clientes, para mantener
-# consistencia visual (encabezados con separación) en toda la app.
-# El encabezado usa un tono azul-gris suave en vez de blanco/gris plano.
-ESTILO_TABLA = """
-    QTableWidget {
-        background-color: transparent;
-        color: #e5e7eb;
-
-        border: 1px solid #3d414a;
-
-        selection-background-color: #2f6fed;
-        selection-color: white;
-    }
-
-    QHeaderView {
-        background-color: transparent;
-    }
-
-    QHeaderView::section {
-        background-color: #2a2e36;
-        color: #ffffff;
-
-        padding: 9px 12px;
-
-        border: none;
-        border-bottom: 2px solid #3b82f6;
-
-        font-weight: 600;
-    }
-
-    QTableWidget::item {
-        padding: 6px 10px;
-        border: none;
-        background-color: transparent;
-    }
-
-    QTableWidget::item:selected {
-        background-color: #2f6fed;
-        color: white;
-    }
-"""
+# El estilo de las tablas sale del tema (ui/estilos_erp.py): es igual en todas las
+# pantallas y en los dos temas. La constante queda vacía para que los
+# setStyleSheet(ESTILO_TABLA) existentes no pisen el tema con colores fijos.
+# (Recuerda: main.py usa app.setStyle("Fusion"), necesario para pintar los encabezados.)
+ESTILO_TABLA = ""
 
 
 class ComprasPage(QWidget):

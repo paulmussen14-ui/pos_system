@@ -1,0 +1,152 @@
+"""Sistema de diseño: valores únicos de color, espaciado, radios y tipografía.
+
+Todo el aspecto de la app sale de aquí. La plantilla de estilos
+(ui/estilos_erp.py) usa estos valores con marcadores {{nombre}}, y el código
+de las pantallas puede importar las constantes de espaciado para que los
+layouts coincidan con los estilos.
+
+Escala de espaciado: 8 / 16 / 24 (con 4 y 32 para casos puntuales).
+Radios: 6 (campos, botones), 8 (tablas, listas), 12 (tarjetas, diálogos).
+Tipografía: título 22, subtítulo 15, texto 13, ayuda 12.
+"""
+
+# --- Espaciado (px) ---
+ESPACIO_XS = 4
+ESPACIO_SM = 8
+ESPACIO_MD = 16
+ESPACIO_LG = 24
+ESPACIO_XL = 32
+
+# --- Radios (px) ---
+RADIO_SM = 6
+RADIO_MD = 8
+RADIO_LG = 12
+
+# --- Tipografía (px) ---
+TIPO_TITULO = 22
+TIPO_SUBTITULO = 15
+TIPO_TEXTO = 13
+TIPO_AYUDA = 12
+TIPO_KPI = 26
+TIPO_TOTAL = 28
+
+# --- Medidas fijas de la estructura ---
+ANCHO_SIDEBAR = 240
+MARGEN_PAGINA = ESPACIO_LG  # margen exterior de cada pantalla
+
+ESCALAS = {
+    "e_xs": ESPACIO_XS, "e_sm": ESPACIO_SM, "e_md": ESPACIO_MD,
+    "e_lg": ESPACIO_LG, "e_xl": ESPACIO_XL,
+    "r_sm": RADIO_SM, "r_md": RADIO_MD, "r_lg": RADIO_LG,
+    "t_titulo": TIPO_TITULO, "t_subtitulo": TIPO_SUBTITULO,
+    "t_texto": TIPO_TEXTO, "t_ayuda": TIPO_AYUDA,
+    "t_kpi": TIPO_KPI, "t_total": TIPO_TOTAL,
+    "ancho_sidebar": ANCHO_SIDEBAR,
+}
+
+# --- Paletas ---
+# Familias semánticas: primario, exito, peligro, aviso, info.
+# Cada una tiene el color fuerte, uno suave (fondo de badges y avisos) y uno
+# de texto legible sobre ese fondo suave.
+PALETAS = {
+    "claro": {
+        # Neutros
+        "fondo": "#f3f5f9",
+        "superficie": "#ffffff",
+        "superficie_alt": "#f8fafc",
+        "input_fondo": "#ffffff",
+        "borde": "#e2e8f0",
+        "borde_fuerte": "#cbd5e1",
+        "texto": "#0f172a",
+        "texto_suave": "#475569",
+        "texto_tenue": "#94a3b8",
+        "hover": "#f1f5f9",
+        # Primario
+        "primario": "#2563eb",
+        "primario_hover": "#1d4ed8",
+        "primario_presionado": "#1e40af",
+        "primario_suave": "#dbeafe",
+        "primario_texto": "#1e40af",
+        # Éxito
+        "exito": "#16a34a",
+        "exito_hover": "#15803d",
+        "exito_suave": "#dcfce7",
+        "exito_texto": "#166534",
+        # Peligro
+        "peligro": "#dc2626",
+        "peligro_hover": "#b91c1c",
+        "peligro_suave": "#fee2e2",
+        "peligro_texto": "#991b1b",
+        # Aviso
+        "aviso": "#d97706",
+        "aviso_suave": "#fef3c7",
+        "aviso_texto": "#92400e",
+        # Info
+        "info": "#0284c7",
+        "info_suave": "#e0f2fe",
+        "info_texto": "#075985",
+        # Neutro para badges
+        "neutro_suave": "#e2e8f0",
+        "neutro_texto": "#334155",
+        # Menú lateral
+        "menu_fondo": "#0f172a",
+        "menu_borde": "#1e293b",
+        "menu_texto": "#cbd5e1",
+        "menu_texto_tenue": "#64748b",
+        "menu_hover": "#1e293b",
+        "menu_activo": "#2563eb",
+        "menu_icono": "#94a3b8",
+        "menu_icono_activo": "#ffffff",
+        # Deshabilitado
+        "deshab_fondo": "#cbd5e1",
+        "deshab_texto": "#f8fafc",
+    },
+    "oscuro": {
+        "fondo": "#0f141c",
+        "superficie": "#18202c",
+        "superficie_alt": "#1d2634",
+        "input_fondo": "#111823",
+        "borde": "#2a3444",
+        "borde_fuerte": "#3b475a",
+        "texto": "#e6eaf0",
+        "texto_suave": "#a3aebf",
+        "texto_tenue": "#6b778a",
+        "hover": "#212c3c",
+        "primario": "#3b82f6",
+        "primario_hover": "#2563eb",
+        "primario_presionado": "#1d4ed8",
+        "primario_suave": "#1e3560",
+        "primario_texto": "#93c5fd",
+        "exito": "#22c55e",
+        "exito_hover": "#16a34a",
+        "exito_suave": "#12301f",
+        "exito_texto": "#86efac",
+        "peligro": "#ef4444",
+        "peligro_hover": "#dc2626",
+        "peligro_suave": "#3d1a1d",
+        "peligro_texto": "#fca5a5",
+        "aviso": "#f59e0b",
+        "aviso_suave": "#3a2b0e",
+        "aviso_texto": "#fcd34d",
+        "info": "#38bdf8",
+        "info_suave": "#10304a",
+        "info_texto": "#7dd3fc",
+        "neutro_suave": "#2a3444",
+        "neutro_texto": "#cbd5e1",
+        "menu_fondo": "#0a0e14",
+        "menu_borde": "#18202c",
+        "menu_texto": "#cbd5e1",
+        "menu_texto_tenue": "#64748b",
+        "menu_hover": "#18202c",
+        "menu_activo": "#2563eb",
+        "menu_icono": "#8a97ab",
+        "menu_icono_activo": "#ffffff",
+        "deshab_fondo": "#2a3444",
+        "deshab_texto": "#6b778a",
+    },
+}
+
+
+def paleta(tema: str) -> dict[str, str]:
+    """Devuelve la paleta del tema ('claro' u 'oscuro'; cualquier otro valor = claro)."""
+    return PALETAS["oscuro" if tema == "oscuro" else "claro"]

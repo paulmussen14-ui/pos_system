@@ -1,5 +1,5 @@
-"""Tema visual: une el tema base (light.qss / dark.qss) con la capa de mejoras
-(mejoras_claro.qss / mejoras_oscuro.qss) y dibuja los íconos pequeños que esa
+"""Tema visual: une el tema base (light.qss / dark.qss), la capa de mejoras
+(mejoras_claro.qss / mejoras_oscuro.qss) y la capa ERP (ui/estilos_erp.py) y dibuja los íconos pequeños que esa
 capa necesita (palomita de los checkbox, punto de los radio, flechas de los
 desplegables y de los campos numéricos).
 
@@ -19,6 +19,7 @@ from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 
 from config import APP_DATA_DIR, STYLES_DIR
+from ui.estilos_erp import generar_capa_erp
 from utils.logger import logger
 
 CARPETA_ICONOS = APP_DATA_DIR / "iconos_tema"
@@ -95,17 +96,22 @@ def preparar_iconos(tema: str) -> dict[str, str]:
 
 
 def componer_tema(qss_base: str, tema: str) -> str:
-    """Devuelve el QSS completo: el tema base más la capa de mejoras (con las
-    rutas de los íconos ya puestas). Si no se puede, devuelve solo el tema base."""
+    """Devuelve el QSS completo: tema base + capa de mejoras (con las rutas de los
+    íconos ya puestas) + capa ERP (sistema de diseño, ver ui/estilos_erp.py).
+    Si una capa falla se omite y el error queda en el log; el tema base siempre se usa."""
+    qss = qss_base
     nombre = "mejoras_oscuro.qss" if tema == "oscuro" else "mejoras_claro.qss"
     ruta = STYLES_DIR / nombre
-    if not ruta.is_file():
-        return qss_base
+    if ruta.is_file():
+        try:
+            mejoras = ruta.read_text(encoding="utf-8")
+            for marcador, ruta_icono in preparar_iconos(tema).items():
+                mejoras = mejoras.replace(marcador, ruta_icono)
+            qss = qss + "\n\n" + mejoras
+        except Exception:
+            logger.exception("No se pudo aplicar la capa de mejoras del tema; se omite")
     try:
-        mejoras = ruta.read_text(encoding="utf-8")
-        for marcador, ruta_icono in preparar_iconos(tema).items():
-            mejoras = mejoras.replace(marcador, ruta_icono)
+        qss = qss + "\n\n" + generar_capa_erp(tema)
     except Exception:
-        logger.exception("No se pudo aplicar la capa de mejoras del tema; se usa el tema base")
-        return qss_base
-    return qss_base + "\n\n" + mejoras
+        logger.exception("No se pudo aplicar la capa ERP del tema; se omite")
+    return qss
