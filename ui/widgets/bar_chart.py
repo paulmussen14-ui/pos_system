@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QWidget, QSizePolicy
 from PySide6.QtGui import QPainter, QColor, QFont
 from PySide6.QtCore import Qt, QRectF
 
-PALETA = ["#2563eb", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#06b6d4", "#84cc16"]
+PALETA = ["#10b981", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#06b6d4", "#84cc16"]
 
 
 class _BarCanvas(QWidget):

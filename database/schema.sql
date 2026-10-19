@@ -205,7 +205,11 @@ CREATE TABLE IF NOT EXISTS ventas (
     estado TEXT NOT NULL DEFAULT 'completada',
     -- completada | anulada
     caja_sesion_id INTEGER REFERENCES caja_sesiones(id),
-    chofer TEXT
+    chofer TEXT,
+    -- Cliente libre: nombre/tipo escritos a mano, NO se guardan en clientes
+    cliente_libre_nombre TEXT,
+    cliente_libre_tipo TEXT,
+    cupon_codigo TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
 CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas(cliente_id);
@@ -355,3 +359,109 @@ CREATE INDEX IF NOT EXISTS idx_historial_costos_producto ON historial_costos(pro
 CREATE INDEX IF NOT EXISTS idx_historial_precios_producto ON historial_precios(producto_id);
 CREATE INDEX IF NOT EXISTS idx_caja_mov_sesion ON caja_movimientos(caja_sesion_id);
 CREATE INDEX IF NOT EXISTS idx_devoluciones_venta ON devoluciones(venta_id, producto_id);
+
+-- ------------------------------------------------------------
+-- CUPONES (códigos generados por el sistema)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS cupones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo TEXT NOT NULL UNIQUE,
+    descripcion TEXT,
+    tipo TEXT NOT NULL DEFAULT 'porcentaje',   -- porcentaje | monto
+    valor REAL NOT NULL DEFAULT 0,
+    compra_minima REAL NOT NULL DEFAULT 0,
+    fecha_inicio TEXT,
+    fecha_fin TEXT,
+    usos_maximos INTEGER NOT NULL DEFAULT 0,   -- 0 = ilimitado
+    usos INTEGER NOT NULL DEFAULT 0,
+    activo INTEGER NOT NULL DEFAULT 1,
+    creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ------------------------------------------------------------
+-- PROFORMAS (cotizaciones: no mueven stock ni caja)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS proformas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+    fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    cliente_id INTEGER REFERENCES clientes(id),
+    cliente_nombre TEXT,
+    cliente_tipo TEXT,
+    subtotal REAL NOT NULL DEFAULT 0,
+    descuento REAL NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0,
+    validez_dias INTEGER NOT NULL DEFAULT 7,
+    notas TEXT,
+    estado TEXT NOT NULL DEFAULT 'pendiente',  -- pendiente | convertida | anulada
+    venta_id INTEGER REFERENCES ventas(id)
+);
+CREATE TABLE IF NOT EXISTS proforma_detalle (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proforma_id INTEGER NOT NULL REFERENCES proformas(id),
+    producto_id INTEGER NOT NULL REFERENCES productos(id),
+    nombre_producto TEXT NOT NULL,
+    cantidad REAL NOT NULL,
+    precio_unitario REAL NOT NULL,
+    subtotal REAL NOT NULL,
+    presentacion_nombre TEXT,
+    cantidad_presentacion REAL,
+    factor_unidades REAL
+);
+CREATE INDEX IF NOT EXISTS idx_proforma_detalle ON proforma_detalle(proforma_id);
+
+-- ------------------------------------------------------------
+-- RRHH
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS trabajadores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    documento TEXT,
+    telefono TEXT,
+    funcion TEXT,
+    tipo_pago TEXT NOT NULL DEFAULT 'mensual', -- mensual | quincenal | semanal
+    monto_base REAL NOT NULL DEFAULT 0,        -- sueldo por periodo
+    fecha_ingreso TEXT,
+    activo INTEGER NOT NULL DEFAULT 1,
+    creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    hora_entrada TEXT,                         -- horario: 'HH:MM'
+    hora_salida TEXT,
+    dias_laborales TEXT                        -- '0,1,2,3,4,5' (0 = lunes)
+);
+CREATE TABLE IF NOT EXISTS trabajador_asistencia (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id),
+    fecha TEXT NOT NULL,                       -- 'YYYY-MM-DD'
+    entrada TEXT,                              -- 'HH:MM'
+    salida TEXT,
+    minutos_tarde INTEGER NOT NULL DEFAULT 0,
+    observacion TEXT,
+    UNIQUE (trabajador_id, fecha)
+);
+CREATE TABLE IF NOT EXISTS trabajador_pagos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id),
+    fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    periodo_desde TEXT,
+    periodo_hasta TEXT,
+    base REAL NOT NULL DEFAULT 0,
+    bonificaciones REAL NOT NULL DEFAULT 0,
+    descuentos REAL NOT NULL DEFAULT 0,
+    adelantos REAL NOT NULL DEFAULT 0,
+    neto REAL NOT NULL DEFAULT 0,
+    usuario_id INTEGER REFERENCES usuarios(id),
+    caja_sesion_id INTEGER REFERENCES caja_sesiones(id),
+    notas TEXT
+);
+CREATE TABLE IF NOT EXISTS trabajador_movimientos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id),
+    fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    tipo TEXT NOT NULL,                        -- adelanto | descuento | bonificacion
+    monto REAL NOT NULL,
+    motivo TEXT,
+    pago_id INTEGER REFERENCES trabajador_pagos(id),  -- NULL = pendiente
+    anulado INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_trab_mov ON trabajador_movimientos(trabajador_id, pago_id);
+CREATE INDEX IF NOT EXISTS idx_trab_pagos ON trabajador_pagos(trabajador_id);

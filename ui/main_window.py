@@ -1,12 +1,13 @@
 """Ventana principal de la aplicación: sidebar + área de contenido (QStackedWidget)."""
 
 import os
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
     QLabel, QStackedWidget, QButtonGroup, QFrame
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QPixmap
 
 from ui.dashboard.dashboard_page import DashboardPage
@@ -17,11 +18,14 @@ from ui.inventario.inventario_page import InventarioPage
 from ui.clientes.clientes_page import ClientesPage
 from ui.caja.caja_page import CajaPage
 from ui.reportes.reportes_page import ReportesPage
+from ui.rrhh.rrhh_page import RrhhPage
+from ui.proformas.proformas_page import ProformasPage
+from ui.cupones.cupones_page import CuponesPage
 from ui.configuracion.configuracion_page import ConfiguracionPage
 from services.configuracion_service import ConfiguracionService
 from ui.tema_iconos import componer_tema
-from ui.iconos import icono_menu
-from ui.tokens import paleta, ANCHO_SIDEBAR, ESPACIO_SM, ESPACIO_MD
+from ui.iconos import icono_menu, icono
+from ui.tokens import paleta, ANCHO_SIDEBAR, ESPACIO_SM, ESPACIO_MD, ESPACIO_LG
 from config import STYLES_DIR, APP_ICON_PATH, APP_VERSION
 
 # Logo del negocio (el que el cliente sube en Configuración): ocupa todo el ancho
@@ -37,6 +41,15 @@ ICONO_MENU = 20
 # Texto que se muestra en el sidebar si el negocio aún no tiene nombre.
 NOMBRE_NEGOCIO_POR_DEFECTO = "Mi Negocio"
 
+ALTO_BARRA_SUPERIOR = 80
+# Por debajo de esta altura de ventana se oculta la tarjeta "Nueva venta" del menú
+# para que todos los botones sigan cabiendo sin desplazarse.
+ALTO_MINIMO_TARJETA_MENU = 780
+
+DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+         "septiembre", "octubre", "noviembre", "diciembre"]
+
 # Texto pequeño al pie del menú ("" para ocultarlo).
 PIE_SIDEBAR = f"POS Local · v{APP_VERSION}"
 
@@ -44,9 +57,11 @@ PIE_SIDEBAR = f"POS Local · v{APP_VERSION}"
 # "Inicio" va arriba, sin grupo. El orden de aquí es también el orden del QStackedWidget.
 MENU_INICIO = ("Inicio", "inicio")
 MENU_GRUPOS = [
-    ("OPERACIÓN", [("Ventas", "carrito"), ("Caja", "caja_registradora"), ("Clientes", "clientes")]),
+    ("OPERACIÓN", [("Ventas", "carrito"), ("Proformas", "ticket"), ("Caja", "caja_registradora"),
+                  ("Clientes", "clientes")]),
     ("INVENTARIO", [("Productos", "producto"), ("Compras", "compras"), ("Inventario", "inventario")]),
-    ("ADMINISTRACIÓN", [("Reportes", "reportes"), ("Configuración", "configuracion")]),
+    ("ADMINISTRACIÓN", [("RRHH", "usuario"), ("Cupones", "etiqueta"), ("Reportes", "reportes"),
+                        ("Configuración", "configuracion")]),
 ]
 
 
@@ -102,6 +117,9 @@ class MainWindow(QMainWindow):
             "Compras": lambda: ComprasPage(self.usuario),
             "Inventario": lambda: InventarioPage(self.usuario),
             "Reportes": lambda: ReportesPage(self.usuario),
+            "RRHH": lambda: RrhhPage(self.usuario),
+            "Proformas": lambda: ProformasPage(self.usuario),
+            "Cupones": lambda: CuponesPage(self.usuario),
             "Configuración": lambda: ConfiguracionPage(self.usuario),
         }
 
@@ -115,8 +133,16 @@ class MainWindow(QMainWindow):
                 self._agregar_item_menu(layout_sidebar, item, paginas_por_nombre)
 
         self.paginas["Configuración"].tema_cambiado = self._aplicar_tema
+        # Los accesos rápidos y enlaces "ver más" del Inicio abren otras pantallas.
+        self.paginas["Inicio"].navegar = self.ir_a
+        # Proformas ↔ Ventas: convertir carga la proforma en el carrito de Ventas.
+        self.paginas["Proformas"].convertir = self._convertir_proforma
+        self.paginas["Ventas"].proforma_guardada = lambda _id: self.paginas["Proformas"].actualizar()
 
         layout_sidebar.addStretch()
+        self.tarjeta_venta = self._crear_tarjeta_nueva_venta()
+        layout_sidebar.addWidget(self.tarjeta_venta)
+        layout_sidebar.addSpacing(ESPACIO_SM)
 
         btn_cerrar_sesion = QPushButton("  Cerrar sesión")
         btn_cerrar_sesion.setObjectName("navLogout")
@@ -131,8 +157,16 @@ class MainWindow(QMainWindow):
             pie.setObjectName("sidebarPie")
             layout_sidebar.addWidget(pie)
 
+        self.sidebar = sidebar
+        columna_derecha = QWidget()
+        layout_derecha = QVBoxLayout(columna_derecha)
+        layout_derecha.setContentsMargins(0, 0, 0, 0)
+        layout_derecha.setSpacing(0)
+        layout_derecha.addWidget(self._crear_barra_superior())
+        layout_derecha.addWidget(self.stack, stretch=1)
+
         layout_principal.addWidget(sidebar)
-        layout_principal.addWidget(self.stack, stretch=1)
+        layout_principal.addWidget(columna_derecha, stretch=1)
 
         # Seleccionar "Inicio" por defecto
         primer_boton = self.grupo_botones.buttons()[0]
@@ -175,15 +209,120 @@ class MainWindow(QMainWindow):
         self.label_negocio.setWordWrap(True)
         bloque_texto.addWidget(self.label_negocio)
 
-        self.label_usuario = QLabel()
-        self.label_usuario.setObjectName("sidebarUser")
-        self.label_usuario.setWordWrap(True)
-        bloque_texto.addWidget(self.label_usuario)
-
         fila_identidad.addLayout(bloque_texto, stretch=1)
         layout.addLayout(fila_identidad)
         self._actualizar_encabezado()
         return contenedor
+
+    def _crear_tarjeta_nueva_venta(self) -> QFrame:
+        """Tarjeta al pie del menú con el botón de la acción más usada: vender."""
+        tarjeta = QFrame()
+        tarjeta.setObjectName("sidebarCard")
+        layout = QVBoxLayout(tarjeta)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(4)
+
+        titulo = QLabel("¿Listo para vender?")
+        titulo.setObjectName("sidebarCardTitulo")
+        layout.addWidget(titulo)
+        texto = QLabel("Registra una venta en segundos.")
+        texto.setObjectName("sidebarCardTexto")
+        texto.setWordWrap(True)
+        layout.addWidget(texto)
+        layout.addSpacing(6)
+
+        boton = QPushButton("  Nueva venta")
+        boton.setObjectName("btnNuevaVenta")
+        boton.setCursor(Qt.PointingHandCursor)
+        boton.setIconSize(QSize(18, 18))
+        boton.setIcon(icono("mas", "#ffffff", 18))
+        boton.clicked.connect(lambda: self.ir_a("Ventas"))
+        layout.addWidget(boton)
+
+        contenedor = QWidget()
+        envoltura = QVBoxLayout(contenedor)
+        envoltura.setContentsMargins(ESPACIO_MD - 4, 0, ESPACIO_MD - 4, 0)
+        envoltura.addWidget(tarjeta)
+        return contenedor
+
+    def _crear_barra_superior(self) -> QWidget:
+        """Barra verde sobre el contenido: botón de menú, bienvenida, fecha y hora, y usuario."""
+        barra = QWidget()
+        barra.setObjectName("topBar")
+        barra.setFixedHeight(ALTO_BARRA_SUPERIOR)
+        layout = QHBoxLayout(barra)
+        layout.setContentsMargins(ESPACIO_MD + 4, 0, ESPACIO_LG, 0)
+        layout.setSpacing(ESPACIO_MD)
+
+        self.boton_menu = QPushButton()
+        self.boton_menu.setObjectName("btnMenu")
+        self.boton_menu.setCursor(Qt.PointingHandCursor)
+        self.boton_menu.setIconSize(QSize(22, 22))
+        self.boton_menu.setIcon(icono("menu", "#ffffff", 22))
+        self.boton_menu.setToolTip("Mostrar u ocultar el menú")
+        self.boton_menu.clicked.connect(lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
+        layout.addWidget(self.boton_menu)
+
+        bienvenida = QLabel("Bienvenido")
+        bienvenida.setObjectName("topBarBienvenida")
+        layout.addWidget(bienvenida)
+
+        layout.addStretch()
+        self.label_fecha_hora = QLabel()
+        self.label_fecha_hora.setObjectName("topBarFecha")
+        layout.addWidget(self.label_fecha_hora)
+        layout.addStretch()
+
+        self.label_avatar = QLabel("?")
+        self.label_avatar.setObjectName("topBarAvatar")
+        self.label_avatar.setFixedSize(36, 36)
+        self.label_avatar.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.label_avatar)
+
+        datos = QVBoxLayout()
+        datos.setSpacing(0)
+        self.label_usuario_barra = QLabel()
+        self.label_usuario_barra.setObjectName("topBarUsuario")
+        rol = QLabel("Administrador")
+        rol.setObjectName("topBarRol")
+        datos.addWidget(self.label_usuario_barra)
+        datos.addWidget(rol)
+        layout.addLayout(datos)
+
+        self._actualizar_usuario_barra()
+        self._actualizar_reloj()
+        self._timer_reloj = QTimer(self)
+        self._timer_reloj.setInterval(1000)
+        self._timer_reloj.timeout.connect(self._actualizar_reloj)
+        self._timer_reloj.start()
+        return barra
+
+    def _actualizar_reloj(self) -> None:
+        ahora = datetime.now()
+        dia = DIAS_SEMANA[ahora.weekday()].capitalize()
+        self.label_fecha_hora.setText(
+            f"{dia}, {ahora.day} de {MESES[ahora.month - 1]} de {ahora.year}  ·  {ahora:%H:%M:%S}"
+        )
+
+    def _actualizar_usuario_barra(self) -> None:
+        nombre = self._valor_usuario("nombre") or self._valor_usuario("usuario") or ""
+        self.label_usuario_barra.setText(nombre)
+        self.label_avatar.setText(nombre[:1].upper() or "?")
+
+    def ir_a(self, nombre_pagina: str) -> None:
+        """Abre una pantalla y marca su botón en el menú (lo usan el Inicio y la tarjeta Nueva venta)."""
+        boton, _ = self._iconos_menu[nombre_pagina]
+        boton.setChecked(True)
+        self._navegar(nombre_pagina)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "tarjeta_venta"):
+            self.tarjeta_venta.setVisible(self.height() >= ALTO_MINIMO_TARJETA_MENU)
+
+    def _convertir_proforma(self, proforma: dict) -> None:
+        self.paginas["Ventas"].cargar_proforma(proforma)
+        self.ir_a("Ventas")
 
     def _agregar_item_menu(self, layout_sidebar, item, paginas_por_nombre) -> None:
         """Crea el botón del menú y construye su página dentro del QStackedWidget."""
@@ -226,11 +365,8 @@ class MainWindow(QMainWindow):
         self.label_negocio.setText(negocio)
         self._actualizar_logo(config.get("logo_path"), negocio)
 
-        nombre_usuario = (
-            self._valor_usuario("nombre") or self._valor_usuario("usuario") or ""
-        )
-        self.label_usuario.setText(nombre_usuario)
-        self.label_usuario.setVisible(bool(nombre_usuario))
+        if hasattr(self, "label_usuario_barra"):
+            self._actualizar_usuario_barra()
 
     def _actualizar_logo(self, ruta_logo, negocio: str) -> None:
         """Muestra el logo del NEGOCIO (el de Configuración). Si no hay logo o el

@@ -26,14 +26,18 @@ class VentaRepository:
         self.db = get_db()
 
     def crear_venta(self, cursor, cliente_id, usuario_id, subtotal, descuento, total,
-                     metodo_pago_id, pago_es_efectivo, caja_sesion_id, chofer=None) -> int:
+                     metodo_pago_id, pago_es_efectivo, caja_sesion_id, chofer=None,
+                     cliente_libre_nombre=None, cliente_libre_tipo=None,
+                     cupon_codigo=None) -> int:
         cursor.execute(
             """INSERT INTO ventas
                (cliente_id, usuario_id, subtotal, descuento, total, metodo_pago_id,
-                pago_es_efectivo, estado, caja_sesion_id, chofer)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'completada', ?, ?)""",
+                pago_es_efectivo, estado, caja_sesion_id, chofer,
+                cliente_libre_nombre, cliente_libre_tipo, cupon_codigo)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'completada', ?, ?, ?, ?, ?)""",
             (cliente_id, usuario_id, subtotal, descuento, total,
-             metodo_pago_id, int(pago_es_efectivo), caja_sesion_id, chofer),
+             metodo_pago_id, int(pago_es_efectivo), caja_sesion_id, chofer,
+             cliente_libre_nombre, cliente_libre_tipo, cupon_codigo),
         )
         return cursor.lastrowid
 
@@ -53,7 +57,7 @@ class VentaRepository:
 
     def listar_ventas(self, fecha_desde: str = "", fecha_hasta: str = "", limite: int = 500) -> list[dict]:
         query = """
-            SELECT v.*, c.nombre AS cliente_nombre, c.direccion AS cliente_direccion,
+            SELECT v.*, COALESCE(c.nombre, v.cliente_libre_nombre) AS cliente_nombre, c.direccion AS cliente_direccion,
                    mp.nombre AS metodo_pago_nombre
             FROM ventas v
             LEFT JOIN clientes c ON c.id = v.cliente_id
@@ -77,7 +81,7 @@ class VentaRepository:
 
     def obtener_venta(self, venta_id: int) -> dict | None:
         cur = self.db.get_connection().execute(
-            """SELECT v.*, c.nombre AS cliente_nombre, c.direccion AS cliente_direccion,
+            """SELECT v.*, COALESCE(c.nombre, v.cliente_libre_nombre) AS cliente_nombre, c.direccion AS cliente_direccion,
                       mp.nombre AS metodo_pago_nombre
                FROM ventas v
                LEFT JOIN clientes c ON c.id = v.cliente_id
@@ -141,11 +145,54 @@ class VentaRepository:
 
     def ultimas_ventas(self, limite: int = 10) -> list[dict]:
         cur = self.db.get_connection().execute(
-            """SELECT v.*, c.nombre AS cliente_nombre
+            """SELECT v.*, COALESCE(c.nombre, v.cliente_libre_nombre) AS cliente_nombre
                FROM ventas v
                LEFT JOIN clientes c ON c.id = v.cliente_id
                WHERE v.estado = 'completada'
                ORDER BY v.fecha DESC LIMIT ?""",
+            (limite,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    def comparativo_hoy_ayer(self) -> dict:
+        """Ventas, transacciones y clientes atendidos de hoy y de ayer, en una sola
+        consulta (para mostrar la variación en las tarjetas del inicio)."""
+        ayer = "date('now', 'localtime', '-1 day')"
+        cur = self.db.get_connection().execute(
+            f"""SELECT
+                   COALESCE(SUM(CASE WHEN fecha >= {_HOY_DESDE} THEN total END), 0) AS total_hoy,
+                   COALESCE(SUM(CASE WHEN fecha >= {_HOY_DESDE} THEN 1 END), 0) AS cantidad_hoy,
+                   COUNT(DISTINCT CASE WHEN fecha >= {_HOY_DESDE} THEN cliente_id END) AS clientes_hoy,
+                   COALESCE(SUM(CASE WHEN fecha < {_HOY_DESDE} THEN total END), 0) AS total_ayer,
+                   COALESCE(SUM(CASE WHEN fecha < {_HOY_DESDE} THEN 1 END), 0) AS cantidad_ayer
+               FROM ventas
+               WHERE fecha >= {ayer} AND fecha < {_HOY_HASTA}
+                 AND estado = 'completada'"""
+        )
+        return dict(cur.fetchone())
+
+    def utilidad_de_ayer(self) -> float:
+        cur = self.db.get_connection().execute(
+            f"""SELECT COALESCE(SUM((vd.precio_venta_unitario - vd.costo_unitario_snapshot) * vd.cantidad), 0) AS utilidad
+               FROM venta_detalle vd
+               JOIN ventas v ON v.id = vd.venta_id
+               WHERE v.fecha >= date('now', 'localtime', '-1 day') AND v.fecha < {_HOY_DESDE}
+                 AND v.estado = 'completada'"""
+        )
+        return cur.fetchone()["utilidad"]
+
+    def ultimas_ventas_resumen(self, limite: int = 5) -> list[dict]:
+        """Últimas ventas completadas con cliente y método de pago (para el inicio)."""
+        cur = self.db.get_connection().execute(
+            f"""SELECT v.id, v.fecha, v.total,
+                       COALESCE(c.nombre, v.cliente_libre_nombre) AS cliente_nombre,
+                       mp.nombre AS metodo_pago_nombre,
+                       (date(v.fecha) = {_HOY_DESDE}) AS es_hoy
+               FROM ventas v
+               LEFT JOIN clientes c ON c.id = v.cliente_id
+               LEFT JOIN metodos_pago mp ON mp.id = v.metodo_pago_id
+               WHERE v.estado = 'completada' AND v.fecha >= {_RET_DESDE}
+               ORDER BY v.fecha DESC, v.id DESC LIMIT ?""",
             (limite,),
         )
         return [dict(r) for r in cur.fetchall()]

@@ -17,7 +17,7 @@ class _AreaCanvas(QWidget):
         self.setMinimumHeight(160)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._puntos: list[tuple[str, float]] = []
-        self._color_linea = QColor("#2563eb")
+        self._color_linea = QColor("#059669")
         self._color_texto = QColor("#6b7280")
         self._color_grilla = QColor("#e5e7eb")
 
@@ -106,7 +106,12 @@ class _AreaCanvas(QWidget):
             painter.drawEllipse(p, 3, 3)
 
         painter.setPen(self._color_texto)
+        # Si hay poco ancho por punto, se muestra una etiqueta de cada N (siempre la última).
+        separacion = ancho / (n - 1) if n > 1 else ancho
+        paso = max(1, int(-(-52 // separacion))) if separacion > 0 else 1
         for i, (etiqueta, _) in enumerate(self._puntos):
+            if (n - 1 - i) % paso != 0:
+                continue
             painter.drawText(
                 QRectF(coords[i].x() - 24, margen_arr + alto + 4, 48, 16),
                 Qt.AlignCenter,
@@ -137,8 +142,12 @@ class LineChartWidget(QFrame):
     def set_datos(self, puntos: list[tuple[str, float]]) -> None:
         self._canvas.set_datos(puntos)
 
+    def set_colores(self, linea: str, texto: str, grilla: str) -> None:
+        """Colores propios (por ejemplo, los del tema verde del inicio)."""
+        self._canvas.set_colores(linea=linea, texto=texto, grilla=grilla)
+
     def set_modo_oscuro(self, oscuro: bool) -> None:
         if oscuro:
-            self._canvas.set_colores(linea="#3b82f6", texto="#9ca3af", grilla="#374151")
+            self._canvas.set_colores(linea="#10b981", texto="#9ca3af", grilla="#374151")
         else:
-            self._canvas.set_colores(linea="#2563eb", texto="#6b7280", grilla="#e5e7eb")
+            self._canvas.set_colores(linea="#059669", texto="#6b7280", grilla="#e5e7eb")

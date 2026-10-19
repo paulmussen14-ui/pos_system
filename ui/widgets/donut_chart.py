@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QRectF
 
 from utils.validators import formatear_moneda
 
-PALETA = ["#2563eb", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#06b6d4", "#84cc16"]
+PALETA = ["#10b981", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#06b6d4", "#84cc16"]
 
 
 class _DonutCanvas(QWidget):

@@ -39,7 +39,7 @@ QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QDateEdi
 
 /* :focus va después de :hover para que el azul gane cuando están los dos */
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QTextEdit:focus {
-    border: 1px solid #3b82f6;
+    border: 1px solid #10b981;
 }
 
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QDateEdit:disabled, QTextEdit:disabled {
@@ -129,24 +129,24 @@ QRadioButton::indicator {
 }
 
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {
-    border-color: #3b82f6;
+    border-color: #10b981;
 }
 
 QCheckBox::indicator:checked {
-    background-color: #2563eb;
-    border: 1px solid #2563eb;
+    background-color: #059669;
+    border: 1px solid #059669;
     image: url("{{ICONO_PALOMITA}}");
 }
 
 QRadioButton::indicator:checked {
-    background-color: #2563eb;
-    border: 1px solid #2563eb;
+    background-color: #059669;
+    border: 1px solid #059669;
     image: url("{{ICONO_PUNTO}}");
 }
 
 QCheckBox::indicator:checked:hover, QRadioButton::indicator:checked:hover {
-    background-color: #3b82f6;
-    border-color: #3b82f6;
+    background-color: #10b981;
+    border-color: #10b981;
 }
 
 QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
@@ -175,13 +175,13 @@ QTableWidget::item:hover, QTableView::item:hover {
 }
 
 QTableWidget::item:selected, QTableView::item:selected {
-    background-color: #1e3a8a;
+    background-color: #0b3a2e;
     color: #ffffff;
 }
 
 /* La selección se sigue viendo aunque la tabla pierda el foco */
 QTableWidget::item:selected:!active, QTableView::item:selected:!active {
-    background-color: #1e3a8a;
+    background-color: #0b3a2e;
     color: #ffffff;
 }
 
@@ -196,7 +196,7 @@ QHeaderView::section {
     color: #9ca3af;
     padding: 10px 8px;
     border: none;
-    border-bottom: 2px solid #2563eb;
+    border-bottom: 2px solid #059669;
     font-size: 12px;
     font-weight: 600;
 }
@@ -219,7 +219,7 @@ QHeaderView::section:vertical {
 QTableCornerButton::section {
     background-color: #111827;
     border: none;
-    border-bottom: 2px solid #2563eb;
+    border-bottom: 2px solid #059669;
 }
 
 /* --- Pestañas: la activa lleva una línea azul --- */
@@ -235,7 +235,7 @@ QTabBar::tab:hover:!selected {
 }
 
 QTabBar::tab:selected {
-    border-bottom: 2px solid #3b82f6;
+    border-bottom: 2px solid #10b981;
 }
 
 /* --- Menú lateral: botones en forma de píldora --- */
@@ -283,7 +283,7 @@ QCalendarWidget QToolButton:hover {
 }
 
 QCalendarWidget QAbstractItemView:enabled {
-    selection-background-color: #2563eb;
+    selection-background-color: #059669;
     selection-color: #ffffff;
     outline: 0;
 }

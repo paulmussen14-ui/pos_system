@@ -65,7 +65,7 @@ QWidget#sidebar QPushButton:hover {
 }
 
 QWidget#sidebar QPushButton:checked {
-    background-color: #2563eb;
+    background-color: #059669;
     color: #ffffff;
     font-weight: 600;
 }
@@ -113,7 +113,7 @@ QLabel.cardValue {
 
 /* --- Botones --- */
 QPushButton {
-    background-color: #2563eb;
+    background-color: #059669;
     color: white;
     border: none;
     border-radius: 6px;
@@ -122,11 +122,11 @@ QPushButton {
 }
 
 QPushButton:hover {
-    background-color: #3b82f6;
+    background-color: #10b981;
 }
 
 QPushButton:pressed {
-    background-color: #1d4ed8;
+    background-color: #047857;
 }
 
 QPushButton:disabled {
@@ -166,11 +166,11 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QTextEdit {
     border-radius: 6px;
     padding: 6px 10px;
     color: #e5e7eb;
-    selection-background-color: #2563eb;
+    selection-background-color: #059669;
 }
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus, QDateEdit:focus {
-    border: 1px solid #3b82f6;
+    border: 1px solid #10b981;
 }
 
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QTextEdit:disabled {
@@ -193,7 +193,7 @@ QComboBox QAbstractItemView {
     background-color: #1f2937;
     color: #e5e7eb;
     border: 1px solid #4b5563;
-    selection-background-color: #2563eb;
+    selection-background-color: #059669;
     selection-color: #ffffff;
     outline: none;
 }
@@ -229,7 +229,7 @@ QListWidget::item:hover {
 }
 
 QListWidget::item:selected {
-    background-color: #1e3a8a;
+    background-color: #0b3a2e;
     color: #ffffff;
 }
 
@@ -248,8 +248,8 @@ QCheckBox::indicator, QRadioButton::indicator {
 }
 
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {
-    background-color: #2563eb;
-    border: 1px solid #2563eb;
+    background-color: #059669;
+    border: 1px solid #059669;
 }
 
 /* --- Tablas --- */
@@ -258,7 +258,7 @@ QTableWidget, QTableView {
     border: 1px solid #374151;
     border-radius: 8px;
     gridline-color: #374151;
-    selection-background-color: #1e3a8a;
+    selection-background-color: #0b3a2e;
     selection-color: #ffffff;
     alternate-background-color: #202938;
 }
@@ -299,7 +299,7 @@ QTabBar::tab {
 QTabBar::tab:selected {
     background-color: #1f2937;
     font-weight: 600;
-    color: #60a5fa;
+    color: #34d399;
 }
 
 /* --- Splitters (Ventas: columnas productos/cliente/carrito) --- */

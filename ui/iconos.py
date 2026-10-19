@@ -84,6 +84,7 @@ _TRAZOS = {
     "etiqueta": (
         '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1"/>'
     ),
+    "menu": '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
 }
 
 _CABECERA = (

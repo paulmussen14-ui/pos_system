@@ -68,3 +68,12 @@ def colorear_stock(item: QTableWidgetItem, agotado: bool, bajo: bool, tema: str)
     fuente = QFont(item.font())
     fuente.setBold(True)
     item.setFont(fuente)
+
+
+def compactar_boton(boton, ancho_min: int = 0):
+    """Botón de tabla: alto fijo y relleno corto para que no se recorte dentro de la fila."""
+    boton.setFixedHeight(32)
+    if ancho_min:
+        boton.setMinimumWidth(ancho_min)
+    boton.setStyleSheet("padding: 0px 12px;")
+    return boton

@@ -19,7 +19,7 @@ error, sin modificar nunca una venta ya registrada directamente.
 """
 
 from PySide6.QtWidgets import (
-    QFrame, QGridLayout, QStackedLayout,
+    QFrame, QGridLayout, QStackedLayout, QScrollArea, QButtonGroup,
 
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
 
@@ -42,6 +42,10 @@ from services.configuracion_service import ConfiguracionService
 
 from services.caja_service import CajaService
 from services.ticket_extras_service import TicketExtrasService
+
+from services.cupon_service import CuponService, CuponError
+
+from services.proforma_service import ProformaService, ProformaError
 
 from models.venta import VentaDetalleItem
 
@@ -71,6 +75,11 @@ ALTURA_FILA_CARRITO = 44
 
 ALTURA_FILA_RESULTADOS = 34
 
+ALTURA_FILA_PRODUCTOS = 40
+
+TEXTO_VENTA_GENERAL = "Venta general (sin cliente)"
+TIPOS_CLIENTE_LIBRE = ["Mostrador", "Delivery", "Premium", "Mayorista", "Otro"]
+
 # Las listas de productos y clientes se piden por páginas: se muestran las
 # primeras TAMANO_PAGINA_RESULTADOS y las siguientes se cargan solas al hacer
 # scroll hasta el final. Así abrir Ventas cuesta lo mismo con 500 que con
@@ -79,11 +88,11 @@ TAMANO_PAGINA_RESULTADOS = 100
 
 ANCHO_COLUMNA_NUMERO = 28
 
-ANCHO_COLUMNA_QUITAR = 48
-ANCHO_COLUMNA_PRESENTACION = 124
-ANCHO_COLUMNA_CANTIDAD = 86
-ANCHO_COLUMNA_MONTO = 96
-ANCHO_COLUMNA_CATEGORIA = 92
+ANCHO_COLUMNA_QUITAR = 46
+ANCHO_COLUMNA_PRESENTACION = 112
+ANCHO_COLUMNA_CANTIDAD = 82
+ANCHO_COLUMNA_MONTO = 86
+ANCHO_COLUMNA_CATEGORIA = 78
 
 # El estilo de las tablas sale del tema (ui/estilos_erp.py): es igual en todas las
 # pantallas y en los dos temas. La constante queda vacía para que los
@@ -110,6 +119,24 @@ class _FlechaAbajoALista(QObject):
         return False
 
 
+class _RuedaHorizontal(QObject):
+    """Filtro de eventos: la rueda del mouse desplaza una fila de botones hacia los lados
+    (así no hace falta mostrar la barra de desplazamiento)."""
+
+    def __init__(self, area: QScrollArea):
+        super().__init__(area)
+        self._area = area
+        area.viewport().installEventFilter(self)
+
+    def eventFilter(self, objeto, evento) -> bool:
+        if evento.type() == QEvent.Wheel:
+            barra = self._area.horizontalScrollBar()
+            delta = evento.angleDelta().y() or evento.angleDelta().x()
+            barra.setValue(barra.value() - delta)
+            return True
+        return False
+
+
 class VentasPage(QWidget):
 
     def __init__(self, usuario, parent=None):
@@ -133,6 +160,16 @@ class VentasPage(QWidget):
         self.cliente_seleccionado_id: int | None = None
 
         self.cliente_seleccionado_nombre: str | None = None
+
+        self._cupon: dict | None = None  # cupón aplicado (resultado de CuponService.validar)
+
+        self._proforma_origen_id: int | None = None  # si el carrito viene de una proforma
+
+        self.cupon_service = CuponService()
+
+        self.proforma_service = ProformaService()
+
+        self.proforma_guardada = None  # callback opcional (id) para refrescar Proformas
 
         # Debounce: evita disparar una consulta a la BD por cada tecla
 
@@ -180,6 +217,9 @@ class VentasPage(QWidget):
         # el primero apenas lleguen (ver _enter_en_busqueda_producto / _cliente).
         self._agregar_primer_producto_al_llegar = False
         self._seleccionar_primer_cliente_al_llegar = False
+        # Filtro de categoría de la lista de productos (None = todas).
+        self._categoria_filtro: int | None = None
+        self._categorias_firma = None
         self._construir_ui()
         self.actualizar()
         self.actualizar_totales()
@@ -207,55 +247,17 @@ class VentasPage(QWidget):
         encabezado.agregar_accion(btn_ventas_recientes)
         raiz.addWidget(encabezado)
 
-        # ---- Cuadrícula: izquierda (cliente y productos) 40 % / derecha (venta) 60 % ----
+        # ---- Cuadrícula: izquierda (productos) 40 % / derecha (cliente y venta) 60 % ----
         cuerpo = QHBoxLayout()
         cuerpo.setSpacing(ESPACIO_MD)
-        cuerpo.addLayout(self._construir_panel_izquierdo(), 4)
+        cuerpo.addWidget(self._construir_panel_izquierdo(), 4)
         cuerpo.addWidget(self._construir_panel_derecho(), 6)
         raiz.addLayout(cuerpo, 1)
 
         self._configurar_atajos_y_foco()
 
-    def _construir_panel_izquierdo(self) -> QVBoxLayout:
-        columna = QVBoxLayout()
-        columna.setSpacing(ESPACIO_MD)
-
-        # ---- Tarjeta Cliente ----
-        tarjeta_cliente = Card("Cliente")
-        self.input_busqueda_cliente = QLineEdit()
-        self.input_busqueda_cliente.setPlaceholderText("Buscar cliente por nombre...  (F4)")
-        self.input_busqueda_cliente.setClearButtonEnabled(True)
-        self.input_busqueda_cliente.textChanged.connect(
-            lambda: self._timer_busqueda_cliente.start()
-        )
-        self.input_busqueda_cliente.returnPressed.connect(self._enter_en_busqueda_cliente)
-        tarjeta_cliente.cuerpo.addWidget(self.input_busqueda_cliente)
-
-        self.tabla_clientes = QTableWidget(0, 2)
-        self.tabla_clientes.setHorizontalHeaderLabels(["Nombre", "Teléfono"])
-        header_clientes = self.tabla_clientes.horizontalHeader()
-        header_clientes.setSectionResizeMode(0, QHeaderView.Stretch)
-        header_clientes.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        configurar_tabla_erp(self.tabla_clientes, altura_fila=ALTURA_FILA_RESULTADOS)
-        self.tabla_clientes.setMinimumHeight(78)
-        self.tabla_clientes.verticalScrollBar().valueChanged.connect(self._on_scroll_clientes)
-        self.tabla_clientes.cellDoubleClicked.connect(self._seleccionar_cliente)
-        tarjeta_cliente.cuerpo.addWidget(self.tabla_clientes, 1)
-
-        fila_cliente = QHBoxLayout()
-        fila_cliente.setSpacing(ESPACIO_SM)
-        self.label_cliente_seleccionado = QLabel("Sin cliente seleccionado (venta general)")
-        self.label_cliente_seleccionado.setProperty("class", "chip")
-        self.label_cliente_seleccionado.setWordWrap(True)
-        fila_cliente.addWidget(self.label_cliente_seleccionado, 1)
-        btn_quitar_cliente = QPushButton("Quitar")
-        btn_quitar_cliente.setProperty("class", "secondary")
-        btn_quitar_cliente.clicked.connect(self._quitar_cliente)
-        fila_cliente.addWidget(btn_quitar_cliente)
-        tarjeta_cliente.cuerpo.addLayout(fila_cliente)
-        columna.addWidget(tarjeta_cliente, 1)
-
-        # ---- Tarjeta Productos ----
+    def _construir_panel_izquierdo(self) -> QWidget:
+        """Productos: buscador, categorías como botones y la lista."""
         tarjeta_productos = Card("Productos")
         self.input_busqueda_producto = QLineEdit()
         self.input_busqueda_producto.setPlaceholderText("Buscar producto por nombre...  (F2)")
@@ -265,6 +267,27 @@ class VentasPage(QWidget):
         )
         self.input_busqueda_producto.returnPressed.connect(self._enter_en_busqueda_producto)
         tarjeta_productos.cuerpo.addWidget(self.input_busqueda_producto)
+
+        # Categorías: fila de botones que se desplaza hacia el lado si no caben.
+        self.scroll_categorias = QScrollArea()
+        self.scroll_categorias.setObjectName("chipsScroll")
+        self.scroll_categorias.setWidgetResizable(True)
+        self.scroll_categorias.setFrameShape(QFrame.NoFrame)
+        self.scroll_categorias.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_categorias.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_categorias.setFixedHeight(40)
+        self._rueda_categorias = _RuedaHorizontal(self.scroll_categorias)
+        contenido_chips = QWidget()
+        contenido_chips.setObjectName("chipsContenido")
+        self.fila_categorias = QHBoxLayout(contenido_chips)
+        self.fila_categorias.setContentsMargins(0, 2, 0, 2)
+        self.fila_categorias.setSpacing(ESPACIO_SM)
+        self.fila_categorias.addStretch()
+        self.scroll_categorias.setWidget(contenido_chips)
+        self.grupo_categorias = QButtonGroup(self)
+        self.grupo_categorias.setExclusive(True)
+        tarjeta_productos.cuerpo.addWidget(self.scroll_categorias)
+        self._cargar_categorias()
 
         self.tabla_productos = QTableWidget(0, 4)
         self.tabla_productos.setHorizontalHeaderLabels(["Categoría", "Producto", "Precio", "Stock"])
@@ -278,7 +301,7 @@ class VentasPage(QWidget):
         header_productos.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         # Altura de fila fija para toda la tabla (en vez de setRowHeight fila
         # por fila) y carga de la siguiente página al llegar al final.
-        configurar_tabla_erp(self.tabla_productos, derecha=(2, 3), altura_fila=ALTURA_FILA_RESULTADOS)
+        configurar_tabla_erp(self.tabla_productos, derecha=(2, 3), altura_fila=ALTURA_FILA_PRODUCTOS)
         self.tabla_productos.verticalScrollBar().valueChanged.connect(self._on_scroll_productos)
         self.tabla_productos.cellDoubleClicked.connect(self._agregar_producto_seleccionado)
         tarjeta_productos.cuerpo.addWidget(self.tabla_productos, 1)
@@ -287,13 +310,112 @@ class VentasPage(QWidget):
         ayuda_productos.setProperty("class", "ayuda")
         ayuda_productos.setWordWrap(True)
         tarjeta_productos.cuerpo.addWidget(ayuda_productos)
-        columna.addWidget(tarjeta_productos, 2)
-        return columna
+        return tarjeta_productos
+
+    def _construir_bloque_cliente(self) -> QWidget:
+        """Cliente de la venta, compacto: buscador + cliente elegido en una sola fila.
+        La lista de resultados solo aparece mientras se está buscando."""
+        contenedor = QWidget()
+        columna = QVBoxLayout(contenedor)
+        columna.setContentsMargins(0, 0, 0, 0)
+        columna.setSpacing(ESPACIO_SM)
+
+        fila = QHBoxLayout()
+        fila.setSpacing(ESPACIO_SM)
+        self.input_busqueda_cliente = QLineEdit()
+        self.input_busqueda_cliente.setPlaceholderText("Buscar cliente...  (F4)")
+        self.input_busqueda_cliente.setClearButtonEnabled(True)
+        self.input_busqueda_cliente.textChanged.connect(
+            lambda: self._timer_busqueda_cliente.start()
+        )
+        self.input_busqueda_cliente.textChanged.connect(self._actualizar_visibilidad_clientes)
+        self.input_busqueda_cliente.returnPressed.connect(self._enter_en_busqueda_cliente)
+        fila.addWidget(self.input_busqueda_cliente, 1)
+
+        self.label_cliente_seleccionado = QLabel(TEXTO_VENTA_GENERAL)
+        self.label_cliente_seleccionado.setProperty("class", "chip")
+        fila.addWidget(self.label_cliente_seleccionado, 1)
+        btn_quitar_cliente = QPushButton("Quitar")
+        btn_quitar_cliente.setProperty("class", "secondary")
+        btn_quitar_cliente.clicked.connect(self._quitar_cliente)
+        fila.addWidget(btn_quitar_cliente)
+        columna.addLayout(fila)
+
+        # Cliente libre: se escribe a mano, NO se guarda en la lista de clientes;
+        # solo queda anotado en la venta para poder diferenciarla.
+        fila_libre = QHBoxLayout()
+        fila_libre.setSpacing(ESPACIO_SM)
+        self.input_cliente_libre = QLineEdit()
+        self.input_cliente_libre.setPlaceholderText("O escribe un cliente libre (no se guarda)")
+        self.input_cliente_libre.setClearButtonEnabled(True)
+        self.input_cliente_libre.textChanged.connect(self._on_cliente_libre_cambia)
+        fila_libre.addWidget(self.input_cliente_libre, 1)
+        self.combo_tipo_libre = QComboBox()
+        self.combo_tipo_libre.addItems(TIPOS_CLIENTE_LIBRE)
+        self.combo_tipo_libre.setToolTip("Tipo de cliente (solo para diferenciar la venta)")
+        fila_libre.addWidget(self.combo_tipo_libre)
+        columna.addLayout(fila_libre)
+
+        self.tabla_clientes = QTableWidget(0, 2)
+        self.tabla_clientes.setHorizontalHeaderLabels(["Nombre", "Teléfono"])
+        header_clientes = self.tabla_clientes.horizontalHeader()
+        header_clientes.setSectionResizeMode(0, QHeaderView.Stretch)
+        header_clientes.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        configurar_tabla_erp(self.tabla_clientes, altura_fila=ALTURA_FILA_RESULTADOS)
+        self.tabla_clientes.setMinimumHeight(78)
+        self.tabla_clientes.setMaximumHeight(150)
+        self.tabla_clientes.verticalScrollBar().valueChanged.connect(self._on_scroll_clientes)
+        self.tabla_clientes.cellDoubleClicked.connect(self._seleccionar_cliente)
+        self.tabla_clientes.setVisible(False)
+        columna.addWidget(self.tabla_clientes)
+        return contenedor
+
+    def _actualizar_visibilidad_clientes(self) -> None:
+        self.tabla_clientes.setVisible(bool(self.input_busqueda_cliente.text().strip()))
+
+    def _cargar_categorias(self) -> None:
+        """Arma los botones de categoría (solo si la lista de categorías cambió)."""
+        try:
+            categorias = self.producto_service.categorias_con_productos()
+        except Exception:
+            logger.exception("No se pudieron cargar las categorías")
+            return
+        # Sin categorías con productos no hay nada que filtrar: se oculta toda la fila.
+        self.scroll_categorias.setVisible(bool(categorias))
+        firma = tuple((c["id"], c["nombre"]) for c in categorias)
+        if firma == self._categorias_firma:
+            return
+        self._categorias_firma = firma
+
+        for boton in list(self.grupo_categorias.buttons()):
+            self.grupo_categorias.removeButton(boton)
+            self.fila_categorias.removeWidget(boton)
+            boton.deleteLater()
+
+        if self._categoria_filtro not in {c["id"] for c in categorias}:
+            self._categoria_filtro = None
+
+        opciones = [("Todas", None)] + [(c["nombre"], c["id"]) for c in categorias]
+        for posicion, (nombre, categoria_id) in enumerate(opciones):
+            boton = QPushButton(nombre)
+            boton.setObjectName("chipCategoria")
+            boton.setCheckable(True)
+            boton.setCursor(Qt.PointingHandCursor)
+            boton.setChecked(categoria_id == self._categoria_filtro)
+            boton.clicked.connect(lambda _=False, c=categoria_id: self._filtrar_por_categoria(c))
+            self.grupo_categorias.addButton(boton)
+            self.fila_categorias.insertWidget(posicion, boton)
+
+    def _filtrar_por_categoria(self, categoria_id) -> None:
+        self._categoria_filtro = categoria_id
+        self._buscar_productos()
+        self._enfocar_busqueda_producto()
 
     def _construir_panel_derecho(self) -> QWidget:
         tarjeta = Card("Resumen de venta")
         self.badge_items = StatusBadge("0 productos", "neutral")
         tarjeta.agregar_accion(self.badge_items)
+        tarjeta.cuerpo.addWidget(self._construir_bloque_cliente())
 
         # ---- Carrito (con estado vacío que se reemplaza por la tabla) ----
         self.tabla_carrito = QTableWidget(0, 7)
@@ -334,20 +456,42 @@ class VentasPage(QWidget):
         self.input_descuento.valueChanged.connect(self.actualizar_totales)
         self.combo_metodo_pago = QComboBox()
         self.input_chofer = QLineEdit()
-        self.input_chofer.setPlaceholderText("Chofer de esta venta")
+        self.input_chofer.setPlaceholderText("Chofer")
 
         formulario = QGridLayout()
         formulario.setHorizontalSpacing(ESPACIO_MD)
         formulario.setVerticalSpacing(4)
-        formulario.setColumnStretch(0, 1)
-        formulario.setColumnStretch(1, 1)
+        for columna in range(3):
+            formulario.setColumnStretch(columna, 1)
         formulario.addWidget(etiqueta("Descuento"), 0, 0)
         formulario.addWidget(etiqueta("Método de pago"), 0, 1)
+        formulario.addWidget(etiqueta("Chofer"), 0, 2)
         formulario.addWidget(self.input_descuento, 1, 0)
         formulario.addWidget(self.combo_metodo_pago, 1, 1)
-        formulario.addWidget(etiqueta("Chofer", 6), 2, 0, 1, 2)
-        formulario.addWidget(self.input_chofer, 3, 0, 1, 2)
+        formulario.addWidget(self.input_chofer, 1, 2)
         tarjeta.cuerpo.addLayout(formulario)
+
+        # ---- Cupón ----
+        fila_cupon = QHBoxLayout()
+        fila_cupon.setSpacing(ESPACIO_SM)
+        self.input_cupon = QLineEdit()
+        self.input_cupon.setPlaceholderText("Cupón de descuento (ej. CUP-AB12CD)")
+        self.input_cupon.returnPressed.connect(self._aplicar_cupon)
+        fila_cupon.addWidget(self.input_cupon, 1)
+        self.btn_cupon = QPushButton("Aplicar")
+        self.btn_cupon.setProperty("class", "secondary")
+        self.btn_cupon.clicked.connect(self._aplicar_cupon)
+        fila_cupon.addWidget(self.btn_cupon)
+        self.btn_quitar_cupon = QPushButton("Quitar")
+        self.btn_quitar_cupon.setProperty("class", "secondary")
+        self.btn_quitar_cupon.clicked.connect(self._quitar_cupon)
+        self.btn_quitar_cupon.setVisible(False)
+        fila_cupon.addWidget(self.btn_quitar_cupon)
+        tarjeta.cuerpo.addLayout(fila_cupon)
+        self.label_cupon = QLabel("")
+        self.label_cupon.setProperty("class", "ayuda")
+        self.label_cupon.setVisible(False)
+        tarjeta.cuerpo.addWidget(self.label_cupon)
 
         # ---- Bloque de total destacado ----
         caja_total = QFrame()
@@ -370,6 +514,7 @@ class VentasPage(QWidget):
 
         self.label_subtotal = fila_resumen("Subtotal")
         self.label_descuento_valor = fila_resumen("Descuento")
+        self.label_cupon_valor = fila_resumen("Cupón")
         separador = QFrame()
         separador.setObjectName("separador")
         v_total.addWidget(separador)
@@ -390,6 +535,10 @@ class VentasPage(QWidget):
         self.btn_registrar.setProperty("class", "success large")
         self.btn_registrar.clicked.connect(self._registrar_venta)
         tarjeta.cuerpo.addWidget(self.btn_registrar)
+        self.btn_proforma = QPushButton("Guardar como proforma")
+        self.btn_proforma.setProperty("class", "secondary")
+        self.btn_proforma.clicked.connect(self._guardar_proforma)
+        tarjeta.cuerpo.addWidget(self.btn_proforma)
         return tarjeta
 
     def _crear_estado_vacio_carrito(self) -> QWidget:
@@ -531,6 +680,7 @@ class VentasPage(QWidget):
 
     def actualizar(self) -> None:
 
+        self._cargar_categorias()
         self._cargar_metodos_pago()
         self._cargar_chofer_por_defecto()
 
@@ -605,7 +755,8 @@ class VentasPage(QWidget):
         # Se pide uno de más solo para saber si queda otra página, sin un
         # COUNT aparte; ese de más nunca se muestra.
         worker = Worker(
-            self.producto_service.listar, texto, TAMANO_PAGINA_RESULTADOS + 1, offset
+            self.producto_service.listar, texto, TAMANO_PAGINA_RESULTADOS + 1, offset,
+            self._categoria_filtro,
         )
 
         worker.signals.finished.connect(
@@ -830,6 +981,9 @@ class VentasPage(QWidget):
         self.cliente_seleccionado_nombre = cliente_nombre
 
         self.label_cliente_seleccionado.setText(f"Cliente: {cliente_nombre}")
+        self.input_cliente_libre.clear()
+        # Se limpia el buscador: así la lista de resultados se oculta y queda solo el cliente elegido.
+        self.input_busqueda_cliente.clear()
 
     def _quitar_cliente(self) -> None:
 
@@ -837,7 +991,7 @@ class VentasPage(QWidget):
 
         self.cliente_seleccionado_nombre = None
 
-        self.label_cliente_seleccionado.setText("Sin cliente seleccionado (venta general)")
+        self.label_cliente_seleccionado.setText(TEXTO_VENTA_GENERAL)
 
     # ------------------------------------------------------ Carrito ----
 
@@ -1016,9 +1170,11 @@ class VentasPage(QWidget):
         moneda = self.config_service.obtener().get("moneda", "S/")
         subtotal = sum(l.subtotal for l in self.carrito)
         descuento = self.input_descuento.value()
-        total = max(subtotal - descuento, 0)
+        descuento_cupon = self._descuento_cupon(subtotal)
+        total = max(subtotal - descuento - descuento_cupon, 0)
         self.label_subtotal.setText(formatear_moneda(subtotal, moneda))
         self.label_descuento_valor.setText(f"- {formatear_moneda(descuento, moneda)}")
+        self.label_cupon_valor.setText(f"- {formatear_moneda(descuento_cupon, moneda)}")
         self.label_total.setText(formatear_moneda(total, moneda))
 
         # Estado de la pantalla según el carrito: mensaje vacío / tabla, contador y botón de cobro.
@@ -1029,6 +1185,126 @@ class VentasPage(QWidget):
         self.badge_items.style().unpolish(self.badge_items)
         self.badge_items.style().polish(self.badge_items)
         self.btn_registrar.setEnabled(cantidad > 0)
+        self.btn_proforma.setEnabled(cantidad > 0)
+
+    # ------------------------------------------------------ Cupón ----
+
+    def _descuento_cupon(self, subtotal: float) -> float:
+        """Descuento del cupón aplicado para el subtotal actual (0 si no hay o ya no aplica)."""
+        if not self._cupon:
+            return 0.0
+        try:
+            return self.cupon_service.validar(self._cupon["codigo"], subtotal)["descuento"]
+        except CuponError as e:
+            # Por ejemplo, se quitaron productos y ya no llega a la compra mínima.
+            self._mostrar_estado_cupon(f"Cupón {self._cupon['codigo']} no aplica: {e}", error=True)
+            return 0.0
+
+    def _mostrar_estado_cupon(self, texto: str, error: bool = False) -> None:
+        self.label_cupon.setText(texto)
+        self.label_cupon.setVisible(bool(texto))
+        self.label_cupon.setProperty("estado", "error" if error else "ok")
+        self.label_cupon.setStyleSheet("color: #dc2626;" if error else "color: #059669;")
+
+    def _aplicar_cupon(self) -> None:
+        subtotal = sum(l.subtotal for l in self.carrito)
+        if subtotal <= 0:
+            self._mostrar_estado_cupon("Agrega productos antes de aplicar un cupón.", error=True)
+            return
+        try:
+            resultado = self.cupon_service.validar(self.input_cupon.text(), subtotal)
+        except CuponError as e:
+            self._cupon = None
+            self._mostrar_estado_cupon(str(e), error=True)
+            self.actualizar_totales()
+            return
+        self._cupon = resultado
+        self.input_cupon.setText(resultado["codigo"])
+        self.input_cupon.setEnabled(False)
+        self.btn_cupon.setEnabled(False)
+        self.btn_quitar_cupon.setVisible(True)
+        self._mostrar_estado_cupon(f"Cupón {resultado['codigo']} aplicado.")
+        self.actualizar_totales()
+
+    def _quitar_cupon(self) -> None:
+        self._cupon = None
+        self.input_cupon.clear()
+        self.input_cupon.setEnabled(True)
+        self.btn_cupon.setEnabled(True)
+        self.btn_quitar_cupon.setVisible(False)
+        self._mostrar_estado_cupon("")
+        self.actualizar_totales()
+
+    # --------------------------------------------------- Cliente libre ----
+
+    def _on_cliente_libre_cambia(self, texto: str) -> None:
+        # Un cliente guardado y uno libre no conviven: escribir uno quita el otro.
+        if texto.strip() and self.cliente_seleccionado_id is not None:
+            self._quitar_cliente()
+
+    def _cliente_libre(self) -> tuple[str | None, str | None]:
+        nombre = self.input_cliente_libre.text().strip()
+        if not nombre:
+            return None, None
+        return nombre, self.combo_tipo_libre.currentText()
+
+    # ------------------------------------------------------- Proformas ----
+
+    def _guardar_proforma(self) -> None:
+        if not self.carrito:
+            return
+        nombre_libre, tipo_libre = self._cliente_libre()
+        subtotal = sum(l.subtotal for l in self.carrito)
+        descuento = round(self.input_descuento.value() + self._descuento_cupon(subtotal), 2)
+        try:
+            proforma_id = self.proforma_service.crear(
+                self.carrito, self.usuario.id, descuento=min(descuento, subtotal),
+                cliente_id=self.cliente_seleccionado_id,
+                cliente_nombre=nombre_libre or "", cliente_tipo=tipo_libre or "",
+            )
+        except ProformaError as e:
+            QMessageBox.warning(self, "No se pudo guardar la proforma", str(e))
+            return
+        if self.proforma_guardada:
+            self.proforma_guardada(proforma_id)
+        QMessageBox.information(
+            self, "Proforma guardada",
+            f"Proforma #{proforma_id} guardada. No se descontó stock ni se movió la caja.\n"
+            "Puedes verla, imprimirla o convertirla en venta desde el menú Proformas."
+        )
+        self._reiniciar_formulario_venta()
+
+    def cargar_proforma(self, proforma: dict) -> None:
+        """Carga una proforma en el carrito para cobrarla como venta."""
+        self._reiniciar_formulario_venta()
+        self.carrito.clear()
+        for l in proforma["lineas"]:
+            self.carrito.append(VentaDetalleItem(
+                producto_id=l["producto_id"], nombre_producto=l["nombre_producto"],
+                cantidad=l["cantidad"], precio_venta_unitario=l["precio_unitario"],
+                costo_unitario_snapshot=0.0,
+                presentacion_nombre=l.get("presentacion_nombre") or "Unidad",
+                cantidad_presentacion=l.get("cantidad_presentacion"),
+                factor_unidades=l.get("factor_unidades") or 1.0,
+            ))
+        self._refrescar_tabla_carrito()
+        if proforma.get("cliente_id"):
+            cliente = self.cliente_service.obtener_por_id(proforma["cliente_id"])
+            if cliente:
+                self.cliente_seleccionado_id = cliente.id
+                self.cliente_seleccionado_nombre = cliente.nombre
+                self.label_cliente_seleccionado.setText(f"Cliente: {cliente.nombre}")
+        elif proforma.get("cliente_nombre"):
+            self.input_cliente_libre.setText(proforma["cliente_nombre"])
+            tipo = proforma.get("cliente_tipo")
+            if tipo:
+                indice = self.combo_tipo_libre.findText(tipo)
+                self.combo_tipo_libre.setCurrentIndex(indice if indice >= 0 else self.combo_tipo_libre.count() - 1)
+        if proforma.get("descuento"):
+            self.input_descuento.setValue(proforma["descuento"])
+        self._proforma_origen_id = proforma["id"]
+        self.badge_items.setToolTip(f"Desde la proforma #{proforma['id']}")
+        self.actualizar_totales()
 
     # ------------------------------------------------- Registrar venta ----
 
@@ -1044,11 +1320,14 @@ class VentasPage(QWidget):
 
         subtotal = sum(l.subtotal for l in self.carrito)
 
-        descuento = self.input_descuento.value()
+        descuento = self.input_descuento.value() + self._descuento_cupon(subtotal)
 
         total = max(subtotal - descuento, 0)
 
-        cliente_texto = self.cliente_seleccionado_nombre or "Sin cliente (venta general)"
+        nombre_libre, tipo_libre = self._cliente_libre()
+
+        cliente_texto = self.cliente_seleccionado_nombre or (
+            f"{nombre_libre} ({tipo_libre})" if nombre_libre else "Sin cliente (venta general)")
 
         metodo_texto = self.combo_metodo_pago.currentText()
 
@@ -1088,6 +1367,9 @@ class VentasPage(QWidget):
 
                 descuento=self.input_descuento.value(),
                 chofer=self.input_chofer.text(),
+                cliente_libre_nombre=nombre_libre,
+                cliente_libre_tipo=tipo_libre,
+                cupon_codigo=self._cupon["codigo"] if self._cupon else None,
 
             )
 
@@ -1096,6 +1378,11 @@ class VentasPage(QWidget):
             QMessageBox.warning(self, "No se pudo registrar la venta", str(e))
 
             return
+
+        if self._proforma_origen_id:
+            self.proforma_service.marcar_convertida(self._proforma_origen_id, venta_id)
+            if self.proforma_guardada:
+                self.proforma_guardada(self._proforma_origen_id)
 
         self._mostrar_vista_previa_ticket(venta_id)
 
@@ -1114,6 +1401,16 @@ class VentasPage(QWidget):
         self.carrito.clear()
 
         self.input_descuento.setValue(0)
+
+        self._quitar_cupon()
+
+        self.input_cliente_libre.clear()
+
+        self.combo_tipo_libre.setCurrentIndex(0)
+
+        self._proforma_origen_id = None
+
+        self.badge_items.setToolTip("")
 
         self.input_busqueda_producto.clear()
 

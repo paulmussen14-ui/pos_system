@@ -18,6 +18,7 @@ from repositories.venta_repository import VentaRepository
 from repositories.inventario_repository import InventarioRepository
 from repositories.caja_repository import CajaRepository
 from models.venta import VentaDetalleItem
+from services.cupon_service import CuponService, CuponError
 
 
 class VentaError(Exception):
@@ -41,6 +42,9 @@ class VentaService:
         metodo_pago_id: int | None,
         descuento: float = 0.0,
         chofer: str | None = None,
+        cliente_libre_nombre: str | None = None,
+        cliente_libre_tipo: str | None = None,
+        cupon_codigo: str | None = None,
     ) -> int:
         if not lineas:
             raise VentaError("La venta debe tener al menos un producto.")
@@ -69,9 +73,21 @@ class VentaService:
                 )
 
         subtotal = round(sum(l.subtotal for l in lineas), 2)
+        # El cupón se valida de nuevo aquí (no se confía en lo que mostró la pantalla)
+        # y su descuento se suma al descuento manual.
+        cupon_codigo = (cupon_codigo or "").strip().upper() or None
+        if cupon_codigo:
+            try:
+                descuento_cupon = CuponService().validar(cupon_codigo, subtotal)["descuento"]
+            except CuponError as e:
+                raise VentaError(str(e))
+            descuento = round(descuento + descuento_cupon, 2)
         if descuento > subtotal:
             raise VentaError("El descuento no puede ser mayor que el subtotal.")
         total = round(subtotal - descuento, 2)
+        # Un cliente guardado manda sobre el libre.
+        if cliente_id:
+            cliente_libre_nombre = cliente_libre_tipo = None
 
         caja_sesion_id = sesion_caja.id if sesion_caja else None
 
@@ -80,7 +96,12 @@ class VentaService:
                 cur, cliente_id, usuario_id, subtotal, descuento, total,
                 metodo_pago_id, pago_es_efectivo, caja_sesion_id,
                 chofer=(chofer or "").strip() or None,
+                cliente_libre_nombre=(cliente_libre_nombre or "").strip() or None,
+                cliente_libre_tipo=(cliente_libre_tipo or "").strip() or None,
+                cupon_codigo=cupon_codigo,
             )
+            if cupon_codigo:
+                CuponService().consumir(cur, cupon_codigo)
 
             for linea in lineas:
                 # Se vuelve a leer el costo vigente dentro de la transacción
@@ -143,6 +164,8 @@ class VentaService:
 
         with self.db.transaction() as cur:
             self.venta_repo.anular_venta(cur, venta_id)
+            if venta.get("cupon_codigo"):
+                CuponService().devolver_uso(cur, venta["cupon_codigo"])
 
             for producto_id, cantidad_vendida in vendido.items():
                 # Lo que ya volvio al stock por devoluciones no se repone otra vez.

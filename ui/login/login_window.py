@@ -55,7 +55,7 @@ class LoginWindow(QWidget):
                 border-radius: 8px;
             }
             QLineEdit:focus {
-                border: 1.5px solid #2563eb;
+                border: 1.5px solid #059669;
             }
         """
 

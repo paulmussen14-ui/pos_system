@@ -14,9 +14,11 @@ class ProductoService:
     def __init__(self):
         self.producto_repo = ProductoRepository()
 
-    def listar(self, texto_busqueda: str = "", limite: int | None = None, offset: int = 0):
+    def listar(self, texto_busqueda: str = "", limite: int | None = None, offset: int = 0,
+               categoria_id: int | None = None):
         return self.producto_repo.listar(
-            solo_activos=True, texto_busqueda=texto_busqueda, limite=limite, offset=offset
+            solo_activos=True, texto_busqueda=texto_busqueda, limite=limite, offset=offset,
+            categoria_id=categoria_id,
         )
 
     def obtener(self, producto_id: int):
@@ -74,6 +76,9 @@ class ProductoService:
 
     def categorias(self):
         return self.producto_repo.listar_categorias()
+
+    def categorias_con_productos(self):
+        return self.producto_repo.listar_categorias_con_productos()
 
     def crear_categoria(self, nombre: str) -> int:
         nombre = nombre.strip()

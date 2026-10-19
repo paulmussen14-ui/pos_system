@@ -202,7 +202,11 @@ def generar_texto_ticket(
     lineas.append(f"Venta #{venta['id']}")
     lineas.append(f"Fecha: {venta['fecha']}")
     if venta.get("cliente_nombre"):
-        lineas.append(f"Cliente: {venta['cliente_nombre']}")
+        tipo_libre = venta.get("cliente_libre_tipo")
+        etiqueta_cliente = f"{venta['cliente_nombre']} ({tipo_libre})" if tipo_libre else venta["cliente_nombre"]
+        lineas.extend(_lineas_envueltas(f"Cliente: {etiqueta_cliente}", ancho_caracteres))
+    if venta.get("cupon_codigo"):
+        lineas.append(f"Cupon: {venta['cupon_codigo']}")
     if venta.get("cliente_direccion"):
         lineas.extend(_lineas_envueltas(f"Direccion: {venta['cliente_direccion']}", ancho_caracteres))
 

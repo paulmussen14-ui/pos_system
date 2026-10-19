@@ -19,7 +19,8 @@ class ProductoRepository:
         self.db = get_db()
 
     def listar(self, solo_activos: bool = True, texto_busqueda: str = "",
-               limite: int | None = None, offset: int = 0) -> list[Producto]:
+               limite: int | None = None, offset: int = 0,
+               categoria_id: int | None = None) -> list[Producto]:
         """
         limite/offset: si se indica limite, la consulta trae como máximo esa
         cantidad de filas a partir de offset (paginación), en vez de traer
@@ -33,6 +34,10 @@ class ProductoRepository:
 
         if solo_activos:
             condiciones.append("p.activo = 1")
+
+        if categoria_id is not None:
+            condiciones.append("p.categoria_id = ?")
+            params.append(categoria_id)
 
         # Cada palabra escrita debe aparecer en el nombre, en cualquier
         # orden y en cualquier parte (ej. "1.5 coca" encuentra "Coca-Cola 1.5L").
@@ -140,6 +145,16 @@ class ProductoRepository:
     # ---- Categorías y proveedores (consultas simples para combos) ----
     def listar_categorias(self) -> list[dict]:
         cur = self.db.get_connection().execute("SELECT * FROM categorias WHERE activo = 1 ORDER BY nombre")
+        return [dict(r) for r in cur.fetchall()]
+
+    def listar_categorias_con_productos(self) -> list[dict]:
+        """Solo las categorías que tienen al menos un producto activo (para los filtros de Ventas)."""
+        cur = self.db.get_connection().execute(
+            """SELECT c.* FROM categorias c
+               WHERE c.activo = 1
+                 AND EXISTS (SELECT 1 FROM productos p WHERE p.categoria_id = c.id AND p.activo = 1)
+               ORDER BY c.nombre"""
+        )
         return [dict(r) for r in cur.fetchall()]
 
     def crear_categoria(self, nombre: str) -> int:

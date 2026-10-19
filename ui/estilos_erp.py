@@ -448,7 +448,7 @@ QFrame#logoCard {
 }
 
 QLabel#logoInicial {
-    background-color: {{primario}};
+    background-color: {{menu_activo}};
     color: #ffffff;
     border-radius: {{r_md}}px;
     font-size: 22px;
@@ -484,11 +484,11 @@ QWidget#sidebar QPushButton#navItem {
     background-color: transparent;
     color: {{menu_texto}};
     text-align: left;
-    padding: 9px 12px;
+    padding: 10px 14px;
     margin: 1px 12px;
     border: none;
-    border-radius: {{r_md}}px;
-    font-size: {{t_texto}}px;
+    border-radius: 10px;
+    font-size: 14px;
     font-weight: 500;
 }
 
@@ -507,17 +507,376 @@ QWidget#sidebar QPushButton#navLogout {
     background-color: transparent;
     color: {{menu_texto}};
     text-align: left;
-    padding: 9px 12px;
+    padding: 10px 14px;
     margin: 1px 12px;
     border: none;
-    border-radius: {{r_md}}px;
-    font-size: {{t_texto}}px;
+    border-radius: 10px;
+    font-size: 14px;
     font-weight: 500;
 }
 
 QWidget#sidebar QPushButton#navLogout:hover {
     background-color: {{peligro_suave}};
     color: {{peligro_texto}};
+}
+
+/* Tarjeta de acción rápida al pie del menú */
+QFrame#sidebarCard {
+    background-color: {{menu_hover}};
+    border: 1px solid {{menu_borde}};
+    border-radius: 12px;
+}
+
+QLabel#sidebarCardTitulo {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QLabel#sidebarCardTexto {
+    color: {{menu_texto}};
+    font-size: 12px;
+}
+
+QWidget#sidebar QPushButton#btnNuevaVenta {
+    background-color: {{menu_activo}};
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QWidget#sidebar QPushButton#btnNuevaVenta:hover {
+    background-color: #0ea371;
+}
+
+/* ===== Barra superior ===== */
+QWidget#topBar {
+    background-color: {{menu_fondo}};
+    border-bottom: 1px solid {{menu_borde}};
+}
+
+QLabel#topBarBienvenida {
+    color: #ffffff;
+    font-size: 17px;
+    font-weight: 600;
+}
+
+QLabel#topBarFecha {
+    color: {{menu_texto}};
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#topBarUsuario {
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#topBarRol {
+    color: {{menu_texto_tenue}};
+    font-size: 12px;
+}
+
+QLabel#topBarAvatar {
+    background-color: {{menu_activo}};
+    color: #ffffff;
+    border-radius: 18px;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QWidget#topBar QPushButton#btnMenu {
+    background-color: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 6px;
+    min-height: 0px;
+}
+
+QWidget#topBar QPushButton#btnMenu:hover {
+    background-color: {{menu_hover}};
+}
+
+/* ===== Inicio (dashboard) ===== */
+QLabel#homeTitulo {
+    color: {{texto}};
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QLabel#homeSubtitulo {
+    color: {{texto_suave}};
+    font-size: 14px;
+}
+
+QFrame#kpiCard, QFrame#homeCard, QFrame#panelCaja {
+    background-color: {{superficie}};
+    border: 1px solid {{borde}};
+    border-radius: 14px;
+}
+
+QLabel#kpiTitulo {
+    color: {{texto_suave}};
+    font-size: 13px;
+}
+
+QLabel#kpiValor {
+    color: {{texto}};
+    font-size: 22px;
+    font-weight: 700;
+}
+
+QLabel#kpiValor[largo="medio"] { font-size: 19px; }
+QLabel#kpiValor[largo="largo"] { font-size: 16px; }
+
+QLabel#kpiDelta {
+    font-size: 12px;
+    font-weight: 600;
+    color: {{texto_tenue}};
+}
+
+QLabel#kpiDelta[tendencia="sube"] {
+    color: {{exito}};
+}
+
+QLabel#kpiDelta[tendencia="baja"] {
+    color: {{peligro}};
+}
+
+QLabel#kpiIcono {
+    border-radius: 20px;
+    background-color: {{neutro_suave}};
+}
+
+QLabel#kpiIcono[tono="exito"] { background-color: {{exito_suave}}; }
+QLabel#kpiIcono[tono="info"] { background-color: {{info_suave}}; }
+QLabel#kpiIcono[tono="aviso"] { background-color: {{aviso_suave}}; }
+QLabel#kpiIcono[tono="primario"] { background-color: {{primario_suave}}; }
+
+QLabel#homeCardTitulo {
+    color: {{texto}};
+    font-size: 16px;
+    font-weight: 700;
+}
+
+QPushButton#homeCardVerMas {
+    background-color: transparent;
+    color: {{exito}};
+    border: none;
+    padding: 0px;
+    min-height: 0px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QPushButton#homeCardVerMas:hover {
+    background-color: transparent;
+    color: {{exito_hover}};
+}
+
+QScrollArea#homeScroll, QWidget#homeContenido {
+    background-color: {{fondo}};
+    border: none;
+}
+
+QFrame#filaLista {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {{borde}};
+}
+
+QFrame#filaLista[ultima="true"] {
+    border-bottom: none;
+}
+
+QLabel#filaTitulo {
+    color: {{texto}};
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel#filaSub {
+    color: {{texto_suave}};
+    font-size: 12px;
+}
+
+QLabel#filaMonto {
+    color: {{texto}};
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QLabel#filaBurbuja {
+    border-radius: 18px;
+    background-color: {{neutro_suave}};
+    color: {{texto}};
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QLabel#filaBurbuja[tono="exito"] { background-color: {{exito_suave}}; }
+QLabel#filaBurbuja[tono="info"] { background-color: {{info_suave}}; }
+QLabel#filaBurbuja[tono="aviso"] { background-color: {{aviso_suave}}; }
+QLabel#filaBurbuja[tono="peligro"] { background-color: {{peligro_suave}}; }
+QLabel#filaBurbuja[tono="primario"] { background-color: {{primario_suave}}; }
+
+QFrame#alertaStock {
+    border-radius: 10px;
+    border: 1px solid {{borde}};
+}
+
+QFrame#alertaStock[nivel="critico"] {
+    background-color: {{peligro_suave}};
+    border: 1px solid {{peligro}};
+}
+
+QFrame#alertaStock[nivel="bajo"] {
+    background-color: {{aviso_suave}};
+    border: 1px solid {{aviso}};
+}
+
+QFrame#alertaStock QLabel {
+    background-color: transparent;
+    border: none;
+}
+
+QFrame#alertaStock[nivel="critico"] QLabel#alertaDetalle {
+    color: {{peligro_texto}};
+}
+
+QFrame#alertaStock[nivel="bajo"] QLabel#alertaDetalle {
+    color: {{aviso_texto}};
+}
+
+QLabel#alertaDetalle {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QPushButton#btnAlerta {
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 12px;
+    min-height: 0px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QPushButton#btnAlerta[nivel="critico"] { background-color: {{peligro}}; }
+QPushButton#btnAlerta[nivel="critico"]:hover { background-color: {{peligro_hover}}; }
+QPushButton#btnAlerta[nivel="bajo"] { background-color: {{aviso}}; }
+QPushButton#btnAlerta[nivel="bajo"]:hover { background-color: {{aviso_texto}}; }
+
+/* ===== Ventas: botones de categoría ===== */
+QScrollArea#chipsScroll, QScrollArea#chipsScroll > QWidget > QWidget#chipsContenido {
+    background-color: transparent;
+    border: none;
+}
+
+QPushButton#chipCategoria {
+    background-color: {{superficie_alt}};
+    color: {{texto_suave}};
+    border: 1px solid {{borde}};
+    border-radius: 15px;
+    padding: 5px 14px;
+    min-height: 0px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QPushButton#chipCategoria:hover {
+    background-color: {{exito_suave}};
+    border: 1px solid {{exito}};
+    color: {{exito_texto}};
+}
+
+QPushButton#chipCategoria:checked {
+    background-color: {{primario}};
+    border: 1px solid {{primario}};
+    color: #ffffff;
+}
+
+/* Panel derecho del inicio (caja + accesos rápidos) */
+QFrame#panelDerecho {
+    background-color: {{superficie}};
+    border: none;
+    border-left: 1px solid {{borde}};
+}
+
+QLabel#panelTitulo {
+    color: {{texto}};
+    font-size: 17px;
+    font-weight: 700;
+}
+
+QLabel#panelSeccion {
+    color: {{texto_suave}};
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QFrame#panelCaja {
+    background-color: {{superficie_alt}};
+}
+
+QLabel#cajaMonto {
+    color: {{texto}};
+    font-size: 26px;
+    font-weight: 700;
+}
+
+QLabel#cajaDetalle {
+    color: {{texto_suave}};
+    font-size: 12px;
+}
+
+QPushButton#btnAcceso {
+    background-color: {{superficie}};
+    color: {{texto}};
+    border: 1px solid {{borde_fuerte}};
+    border-radius: 10px;
+    padding: 10px 8px;
+    font-size: 13px;
+    font-weight: 600;
+    min-height: 0px;
+}
+
+QPushButton#btnAcceso:hover {
+    background-color: {{exito_suave}};
+    border: 1px solid {{exito}};
+    color: {{exito_texto}};
+}
+
+QPushButton#btnCaja {
+    background-color: {{exito}};
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QPushButton#btnCaja:hover {
+    background-color: {{exito_hover}};
+}
+
+QProgressBar#barraPago {
+    background-color: {{neutro_suave}};
+    border: none;
+    border-radius: 3px;
+    max-height: 6px;
+    min-height: 6px;
+}
+
+QProgressBar#barraPago::chunk {
+    background-color: {{exito}};
+    border-radius: 3px;
 }
 """
 
