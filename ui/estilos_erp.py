@@ -160,12 +160,12 @@ QPushButton.danger:disabled {
 }
 
 QPushButton.success {
-    background-color: {{exito}};
+    background-color: {{acento}};
     color: #ffffff;
 }
 
 QPushButton.success:hover {
-    background-color: {{exito_hover}};
+    background-color: {{acento_hover}};
 }
 
 QPushButton.success:disabled {
@@ -665,7 +665,7 @@ QLabel#homeCardTitulo {
 
 QPushButton#homeCardVerMas {
     background-color: transparent;
-    color: {{exito}};
+    color: {{acento}};
     border: none;
     padding: 0px;
     min-height: 0px;
@@ -675,7 +675,7 @@ QPushButton#homeCardVerMas {
 
 QPushButton#homeCardVerMas:hover {
     background-color: transparent;
-    color: {{exito_hover}};
+    color: {{acento_hover}};
 }
 
 QScrollArea#homeScroll, QWidget#homeContenido {
@@ -790,9 +790,9 @@ QPushButton#chipCategoria {
 }
 
 QPushButton#chipCategoria:hover {
-    background-color: {{exito_suave}};
-    border: 1px solid {{exito}};
-    color: {{exito_texto}};
+    background-color: {{acento_suave}};
+    border: 1px solid {{acento}};
+    color: {{acento_texto}};
 }
 
 QPushButton#chipCategoria:checked {
@@ -847,13 +847,13 @@ QPushButton#btnAcceso {
 }
 
 QPushButton#btnAcceso:hover {
-    background-color: {{exito_suave}};
-    border: 1px solid {{exito}};
-    color: {{exito_texto}};
+    background-color: {{acento_suave}};
+    border: 1px solid {{acento}};
+    color: {{acento_texto}};
 }
 
 QPushButton#btnCaja {
-    background-color: {{exito}};
+    background-color: {{acento}};
     color: #ffffff;
     border: none;
     border-radius: 10px;
@@ -863,7 +863,7 @@ QPushButton#btnCaja {
 }
 
 QPushButton#btnCaja:hover {
-    background-color: {{exito_hover}};
+    background-color: {{acento_hover}};
 }
 
 QProgressBar#barraPago {
@@ -875,7 +875,7 @@ QProgressBar#barraPago {
 }
 
 QProgressBar#barraPago::chunk {
-    background-color: {{exito}};
+    background-color: {{acento}};
     border-radius: 3px;
 }
 """

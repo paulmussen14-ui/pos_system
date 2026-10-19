@@ -20,6 +20,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 
 from config import APP_DATA_DIR, STYLES_DIR
 from ui.estilos_erp import generar_capa_erp
+from ui.tokens import recolorear_qss
 from utils.logger import logger
 
 CARPETA_ICONOS = APP_DATA_DIR / "iconos_tema"
@@ -110,6 +111,8 @@ def componer_tema(qss_base: str, tema: str) -> str:
             qss = qss + "\n\n" + mejoras
         except Exception:
             logger.exception("No se pudo aplicar la capa de mejoras del tema; se omite")
+    # Color de marca del cliente sobre los verdes escritos a mano en el tema base y las mejoras.
+    qss = recolorear_qss(qss, tema)
     try:
         qss = qss + "\n\n" + generar_capa_erp(tema)
     except Exception:

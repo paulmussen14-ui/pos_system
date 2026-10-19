@@ -1,4 +1,4 @@
-"""Agenda semanal: el Inicio de los negocios que trabajan con reservas.
+"""Agenda semanal: pantalla propia (menú «Agenda») de los negocios que trabajan con reservas.
 
 Columnas = días de la semana, filas = horas. Un clic en una hora libre abre «Nueva
 reserva»; un clic en una reserva abre su detalle (cobrar, boleta, editar, cancelar).

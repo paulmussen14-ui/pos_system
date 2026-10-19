@@ -27,7 +27,7 @@ from ui.servicios.servicios_page import ServiciosPage
 from services.configuracion_service import ConfiguracionService, MODELO_SERVICIOS, MODELO_VENTAS
 from ui.tema_iconos import componer_tema
 from ui.iconos import icono_menu, icono
-from ui.tokens import paleta, ANCHO_SIDEBAR, ESPACIO_SM, ESPACIO_MD, ESPACIO_LG
+from ui.tokens import paleta, establecer_color_marca, ANCHO_SIDEBAR, ESPACIO_SM, ESPACIO_MD, ESPACIO_LG
 from config import STYLES_DIR, APP_ICON_PATH, APP_VERSION
 
 # Logo del negocio (el que el cliente sube en Configuración): ocupa todo el ancho
@@ -58,6 +58,7 @@ PIE_SIDEBAR = f"POS Local · v{APP_VERSION}"
 # Menú lateral: (nombre de la página, ícono). Los grupos con título agrupan por módulo.
 # "Inicio" va arriba, sin grupo. El orden de aquí es también el orden del QStackedWidget.
 MENU_INICIO = ("Inicio", "inicio")
+MENU_AGENDA = ("Agenda", "calendario")   # solo en el modelo de servicios con reserva
 MENU_GRUPOS = [
     ("OPERACIÓN", [("Ventas", "carrito"), ("Proformas", "ticket"), ("Caja", "caja_registradora"),
                   ("Clientes", "clientes")]),
@@ -71,7 +72,7 @@ MENU_GRUPOS = [
 # Lo que no está en ninguna lista se ve siempre (Inicio, Caja, Clientes, RRHH, Reportes, Configuración).
 # Productos, Compras e Inventario se quedan: los servicios pueden usar productos (descuentan stock).
 PAGINAS_SOLO_VENTAS = {"Ventas", "Proformas", "Cupones"}
-PAGINAS_SOLO_SERVICIOS = {"Servicios"}
+PAGINAS_SOLO_SERVICIOS = {"Servicios", "Agenda"}
 
 
 class MainWindow(QMainWindow):
@@ -133,10 +134,12 @@ class MainWindow(QMainWindow):
             "Cupones": lambda: CuponesPage(self.usuario),
             "Configuración": lambda: ConfiguracionPage(self.usuario),
             "Servicios": lambda: ServiciosPage(self.usuario),
+            "Agenda": lambda: AgendaPage(self.usuario),
         }
 
         layout_sidebar.addSpacing(ESPACIO_SM)
         self._agregar_item_menu(layout_sidebar, MENU_INICIO, paginas_por_nombre)
+        self._agregar_item_menu(layout_sidebar, MENU_AGENDA, paginas_por_nombre)
         for titulo_grupo, items in MENU_GRUPOS:
             etiqueta = QLabel(titulo_grupo)
             etiqueta.setObjectName("sidebarSection")
@@ -145,10 +148,8 @@ class MainWindow(QMainWindow):
             for item in items:
                 self._agregar_item_menu(layout_sidebar, item, paginas_por_nombre)
 
-        # La agenda reemplaza al Inicio cuando el negocio trabaja con servicios: no tiene
-        # botón propio, se llega a ella con "Inicio" (ver _navegar).
-        self.paginas["Agenda"] = AgendaPage(self.usuario)
-        self.stack.addWidget(self.paginas["Agenda"])
+        # En el modelo de servicios, la Agenda es una pantalla propia (botón debajo de Inicio);
+        # el Inicio siempre muestra el dashboard.
         self.paginas["Agenda"].navegar = self.ir_a
 
         self.paginas["Configuración"].tema_cambiado = self._aplicar_tema
@@ -344,7 +345,7 @@ class MainWindow(QMainWindow):
     def _accion_tarjeta(self) -> None:
         """Botón de la tarjeta del menú: nueva venta, o nueva reserva si el negocio da servicios."""
         if self._modelo == MODELO_SERVICIOS:
-            self.ir_a("Inicio")
+            self.ir_a("Agenda")
             self.paginas["Agenda"].nueva_reserva()
         else:
             self.ir_a("Ventas")
@@ -362,10 +363,8 @@ class MainWindow(QMainWindow):
         for etiqueta, nombres in self._titulos_grupo.values():
             etiqueta.setVisible(any(n not in ocultas for n in nombres))
 
-        # "Inicio" pasa a ser la agenda.
-        boton_inicio, _ = self._iconos_menu["Inicio"]
-        boton_inicio.setText("  Agenda" if servicios else "  Inicio")
-        self._iconos_menu["Inicio"] = (boton_inicio, "calendario" if servicios else "inicio")
+        # El dashboard adapta sus accesos rápidos al modelo (Nueva reserva en vez de Nueva venta).
+        self.paginas["Inicio"].aplicar_modelo(self._modelo)
 
         if servicios:
             self.tarjeta_titulo.setText("¿Nueva cita?")
@@ -378,12 +377,12 @@ class MainWindow(QMainWindow):
 
         self._actualizar_iconos_menu(self._tema_actual)
         if inicial:
-            self.stack.setCurrentIndex(list(self.paginas.keys()).index("Agenda" if servicios else "Inicio"))
+            self.stack.setCurrentIndex(list(self.paginas.keys()).index("Inicio"))
         else:
-            # Si la pantalla abierta ya no existe en este modelo (o es el Inicio/Agenda,
-            # que cambia de cara), ir al Inicio; si no, quedarse donde estaba.
+            # Si la pantalla abierta ya no existe en este modelo, ir al Inicio;
+            # si no, quedarse donde estaba.
             actual = list(self.paginas.keys())[self.stack.currentIndex()]
-            if actual in ocultas or actual in ("Inicio", "Agenda"):
+            if actual in ocultas:
                 self.ir_a("Inicio")
 
     def _convertir_proforma(self, proforma: dict) -> None:
@@ -463,8 +462,6 @@ class MainWindow(QMainWindow):
             self.label_inicial.setVisible(True)
 
     def _navegar(self, nombre_pagina: str) -> None:
-        if nombre_pagina == "Inicio" and self._modelo == MODELO_SERVICIOS:
-            nombre_pagina = "Agenda"
         indice = list(self.paginas.keys()).index(nombre_pagina)
         self.stack.setCurrentIndex(indice)
         self._actualizar_encabezado()
@@ -474,6 +471,8 @@ class MainWindow(QMainWindow):
             pagina.actualizar()
 
     def _aplicar_tema(self, tema: str) -> None:
+        # El color de marca (Configuración → Apariencia) se lee aquí para que valga también al abrir.
+        establecer_color_marca(self.config_service.obtener().get("color_marca"))
         nombre_archivo = "dark.qss" if tema == "oscuro" else "light.qss"
         ruta = STYLES_DIR / nombre_archivo
         if ruta.exists():
@@ -481,6 +480,12 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(componer_tema(ruta.read_text(encoding="utf-8"), tema))
         self._tema_actual = "oscuro" if tema == "oscuro" else "claro"
         self._actualizar_iconos_menu(self._tema_actual)
+        # Si ya hay una pantalla abierta, se repinta para que tome los colores nuevos.
+        if getattr(self, "_estilos_aplicados", False):
+            pagina = list(self.paginas.values())[self.stack.currentIndex()]
+            if hasattr(pagina, "actualizar") and pagina is not self.paginas["Configuración"]:
+                pagina.actualizar()
+        self._estilos_aplicados = True
 
     def _cerrar_sesion(self) -> None:
         self.close()

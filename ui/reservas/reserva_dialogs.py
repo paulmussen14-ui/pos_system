@@ -130,7 +130,7 @@ class BoletaDialog(TicketPreviewDialog):
 # ====================================================================
 class ReservaDialog(QDialog):
     """Reservar una hora (o editar una reserva). Permite elegir un tipo de servicio (uno solo) y
-    efectos (varios), que se cobran aparte y suman su costo; quitar productos del servicio y,
+    extras (varios), que se cobran aparte y suman su costo; quitar productos del servicio y,
     al crear, recibir un adelanto del monto que se escriba."""
 
     def __init__(self, fecha: date, hora: str, reserva: dict | None = None, usuario=None, parent=None):
@@ -218,7 +218,7 @@ class ReservaDialog(QDialog):
         self.lista_efectos = QListWidget()
         self.lista_efectos.setMaximumHeight(112)
         self.lista_efectos.itemChanged.connect(self._actualizar_total)
-        self.etiqueta_efectos = QLabel("Efectos:")
+        self.etiqueta_efectos = QLabel("Extras:")
         formulario.addRow(self.etiqueta_efectos, self.lista_efectos)
 
         self.lista_prod = QListWidget()
@@ -311,7 +311,12 @@ class ReservaDialog(QDialog):
 
         self.combo_tipo.addItem("Ninguno", None)
         hay_tipos = False
-        subs = self.servicio_service.listar_subservicios(servicio_id, solo_activos=False)
+        # Los tipos dependen del servicio, pero los efectos salen SIEMPRE (catálogo global),
+        # sin importar a qué servicio se les haya vinculado.
+        subs = [s for s in self.servicio_service.listar_subservicios(servicio_id, solo_activos=False)
+                if s.get("clase") == CLASE_TIPO]
+        subs += [o for o in self.servicio_service.listar_opciones(solo_activas=False)
+                 if o.get("clase") != CLASE_TIPO]
         for sub in subs:
             if not sub["activo"] and sub["id"] not in marcados_sub:
                 continue
@@ -343,11 +348,12 @@ class ReservaDialog(QDialog):
         self.lista_prod.blockSignals(False)
         self.combo_tipo.setVisible(hay_tipos)
         self.etiqueta_tipo.setVisible(hay_tipos)
-        for lista, etiqueta in ((self.lista_efectos, self.etiqueta_efectos),
-                                (self.lista_prod, self.etiqueta_prod)):
-            visible = lista.count() > 0
-            lista.setVisible(visible)
-            etiqueta.setVisible(visible)
+        # Efectos: siempre visibles en cualquier servicio.
+        self.lista_efectos.setVisible(True)
+        self.etiqueta_efectos.setVisible(True)
+        hay_prod = self.lista_prod.count() > 0
+        self.lista_prod.setVisible(hay_prod)
+        self.etiqueta_prod.setVisible(hay_prod)
 
     def _cargar_reserva(self, r: dict) -> None:
         self._cargando = True

@@ -21,6 +21,7 @@ from printing.ticket_prueba import imprimir_ticket_de_prueba
 from printing.ticket_template import ancho_caracteres_por_papel
 from ui.configuracion.ticket_extras_dialog import TicketExtrasDialog
 from ui.configuracion.modelo_negocio_tab import ModeloNegocioTab
+from ui.configuracion.apariencia_tab import AparienciaTab
 from ui.configuracion.correo_tab import CorreoTab
 from ui.configuracion.respaldo_acciones import (
     exportar_productos_ui, importar_productos_ui, restaurar_backup_ui,
@@ -54,6 +55,9 @@ class ConfiguracionPage(QWidget):
         tabs = QTabWidget()
 
         tabs.addTab(self._tab_negocio(), "Negocio")
+        self.tab_apariencia = AparienciaTab()
+        self.tab_apariencia.color_aplicado.connect(self._on_color_aplicado)
+        tabs.addTab(self.tab_apariencia, "Apariencia")
         self.tab_modelo = ModeloNegocioTab()
         self.tab_modelo.modelo_cambiado.connect(self._on_modelo_cambiado)
         tabs.addTab(self.tab_modelo, "Modelo de negocio")
@@ -64,6 +68,11 @@ class ConfiguracionPage(QWidget):
         tabs.addTab(self._tab_seguridad(), "Seguridad")
         tabs.addTab(self._tab_desarrollo(), "Desarrollo")
         layout.addWidget(tabs)
+
+    def _on_color_aplicado(self) -> None:
+        """Repinta todo el sistema con el color de marca recién guardado (tema ya guardado)."""
+        if callable(self.tema_cambiado):
+            self.tema_cambiado(self.config_service.obtener().get("tema", "claro"))
 
     def _on_modelo_cambiado(self, modelo: str) -> None:
         if callable(self.modelo_cambiado):

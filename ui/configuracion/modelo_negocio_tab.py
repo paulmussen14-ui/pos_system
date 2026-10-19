@@ -2,10 +2,10 @@
 
 Permite elegir entre:
   - Ventas de productos: el sistema de siempre (catálogo, stock, ventas, compras).
-  - Servicios con reserva: la pantalla de Inicio pasa a ser una agenda semanal por horas;
+  - Servicios con reserva: el menú suma una Agenda semanal por horas (el Inicio sigue siendo el dashboard);
     el cliente reserva su hora, el negocio cobra y genera su boleta (PDF o correo).
 
-Cambiar de modelo NO borra nada: solo cambia el menú y la pantalla de inicio.
+Cambiar de modelo NO borra nada: solo cambia el menú.
 """
 
 from PySide6.QtCore import Signal
@@ -53,8 +53,8 @@ class ModeloNegocioTab(QWidget):
              "Tienes un catálogo de productos con stock. Vendes en mostrador, compras a "
              "proveedores y controlas el inventario."),
             (self.radio_servicios,
-             "Solo vendes servicios (consultorio, salón, taller, clases...). El Inicio muestra "
-             "una agenda semanal por horas: el cliente reserva su hora, tú cobras y generas su "
+             "Solo vendes servicios (consultorio, salón, taller, clases...). Tienes una "
+             "Agenda semanal por horas (el Inicio sigue mostrando tu dashboard): el cliente reserva su hora, tú cobras y generas su "
              "boleta para enviarla por correo o en PDF."),
         ):
             radio.toggled.connect(self._actualizar_visibilidad)
@@ -169,7 +169,7 @@ class ModeloNegocioTab(QWidget):
             mensaje = ("Ahora tu negocio trabaja con servicios y reservas.\n\n"
                        "Siguiente paso: entra a «Servicios» en el menú y crea los servicios "
                        "que ofreces (con su precio y duración). Después podrás reservar horas "
-                       "desde el Inicio.")
+                       "desde la Agenda.")
         else:
             mensaje = "Ahora tu negocio trabaja con ventas de productos."
         QMessageBox.information(self, "Modelo de negocio actualizado", mensaje)

@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt, QThreadPool, QTimer, QSize
 
 from config import DIAS_RETENCION
 from services.reporte_service import ReporteService
-from services.configuracion_service import ConfiguracionService
+from services.configuracion_service import ConfiguracionService, MODELO_SERVICIOS
 from ui.iconos import pixmap_icono, icono
 from ui.tokens import paleta
 from ui.widgets.line_chart import _AreaCanvas
@@ -241,6 +241,8 @@ class DashboardPage(QWidget):
         self._req_id = 0  # descarta resultados de una carga anterior si se refresca de nuevo antes de que termine
         self._fecha_actual = date.today()
         self._botones_acceso: list[tuple[QPushButton, str]] = []
+        self._destinos_acceso: list[str] = []
+        self._modelo = self.config_service.obtener_modelo_negocio()
         self._construir_ui()
         self.actualizar()
 
@@ -253,8 +255,20 @@ class DashboardPage(QWidget):
     # Construcción de la pantalla
     # ------------------------------------------------------------------
     def _ir(self, destino: str) -> None:
+        # En el modelo de servicios no hay pantalla de Ventas: el detalle se ve en Reportes.
+        if destino == "Ventas" and self._modelo == MODELO_SERVICIOS:
+            destino = "Reportes"
         if self.navegar:
             self.navegar(destino)
+
+    def aplicar_modelo(self, modelo: str) -> None:
+        """Adapta el primer acceso rápido: Nueva venta (ventas) o Nueva reserva (servicios)."""
+        self._modelo = modelo
+        servicios = modelo == MODELO_SERVICIOS
+        self._destinos_acceso[0] = "Agenda" if servicios else "Ventas"
+        boton, _ = self._botones_acceso[0]
+        boton.setText(" Reserva" if servicios else " Venta")
+        boton.setToolTip("Nueva reserva" if servicios else "Nueva venta")
 
     def _nombre_usuario(self) -> str:
         for campo in ("nombre", "usuario"):
@@ -405,7 +419,8 @@ class DashboardPage(QWidget):
             boton.setObjectName("btnAcceso")
             boton.setCursor(Qt.PointingHandCursor)
             boton.setIconSize(QSize(18, 18))
-            boton.clicked.connect(lambda _=False, d=destino: self._ir(d))
+            self._destinos_acceso.append(destino)
+            boton.clicked.connect(lambda _=False, n=i: self._ir(self._destinos_acceso[n]))
             self._botones_acceso.append((boton, nombre_icono))
             grilla.addWidget(boton, i // 2, i % 2)
         columna.addLayout(grilla)
@@ -508,7 +523,7 @@ class DashboardPage(QWidget):
             tarjeta.pintar_icono(colores)
 
     def _pintar_grafico(self, resumen: dict, colores: dict) -> None:
-        self.canvas_ventas.set_colores(colores["exito"], colores["texto_tenue"], colores["borde"])
+        self.canvas_ventas.set_colores(colores["acento"], colores["texto_tenue"], colores["borde"])
         self.canvas_ventas.set_datos([(f["etiqueta"], f["total"]) for f in resumen["ventas_por_dia"]])
 
     def _pintar_top_productos(self, resumen: dict, moneda: str, colores: dict) -> None:

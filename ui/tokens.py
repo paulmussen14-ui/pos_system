@@ -10,6 +10,8 @@ Radios: 6 (campos, botones), 8 (tablas, listas), 12 (tarjetas, diálogos).
 Tipografía: título 22, subtítulo 15, texto 13, ayuda 12.
 """
 
+from ui import color_marca as _color_marca
+
 # --- Espaciado (px) ---
 ESPACIO_XS = 4
 ESPACIO_SM = 8
@@ -72,6 +74,12 @@ PALETAS = {
         "exito_hover": "#15803d",
         "exito_suave": "#dcfce7",
         "exito_texto": "#166534",
+        # Acento: botones de acción principal ("success"), enlaces y resaltados. De fábrica es
+        # el verde de éxito; con un color de marca pasa a ser el color de marca.
+        "acento": "#16a34a",
+        "acento_hover": "#15803d",
+        "acento_suave": "#dcfce7",
+        "acento_texto": "#166534",
         # Peligro
         "peligro": "#dc2626",
         "peligro_hover": "#b91c1c",
@@ -121,6 +129,10 @@ PALETAS = {
         "exito_hover": "#16a34a",
         "exito_suave": "#12301f",
         "exito_texto": "#86efac",
+        "acento": "#22c55e",
+        "acento_hover": "#16a34a",
+        "acento_suave": "#12301f",
+        "acento_texto": "#86efac",
         "peligro": "#ef4444",
         "peligro_hover": "#dc2626",
         "peligro_suave": "#3d1a1d",
@@ -147,6 +159,28 @@ PALETAS = {
 }
 
 
+# Color de marca elegido por el cliente (Configuración → Apariencia). None = verde original.
+_marca: dict | None = None
+
+
+def establecer_color_marca(color: str | None) -> None:
+    """Fija el color de marca: recalcula los tonos del primario y del menú lateral.
+    None, vacío, inválido o el verde original dejan la paleta tal cual viene de fábrica."""
+    global _marca
+    color = _color_marca.normalizar(color)
+    _marca = None if color in (None, _color_marca.COLOR_DEFECTO) else _color_marca.generar(color)
+
+
 def paleta(tema: str) -> dict[str, str]:
-    """Devuelve la paleta del tema ('claro' u 'oscuro'; cualquier otro valor = claro)."""
-    return PALETAS["oscuro" if tema == "oscuro" else "claro"]
+    """Devuelve la paleta del tema ('claro' u 'oscuro'; cualquier otro valor = claro),
+    con los tonos del color de marca si el cliente eligió uno."""
+    clave = "oscuro" if tema == "oscuro" else "claro"
+    base = PALETAS[clave]
+    return {**base, **_marca[clave]} if _marca else base
+
+
+def recolorear_qss(qss: str, tema: str) -> str:
+    """Aplica el color de marca a los colores escritos a mano en los QSS base."""
+    if not _marca:
+        return qss
+    return _color_marca.recolorear_qss(qss, _marca["qss_oscuro" if tema == "oscuro" else "qss_claro"])

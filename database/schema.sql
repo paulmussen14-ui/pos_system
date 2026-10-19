@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS configuracion (
     ticket_pie TEXT DEFAULT 'Gracias por su compra',
     tema TEXT NOT NULL DEFAULT 'claro',
     -- claro | oscuro
+    -- Color de marca elegido por el cliente (hex, ej. #2563eb). Vacío = verde original
+    color_marca TEXT NOT NULL DEFAULT '',
     actualizado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     -- Modelo de negocio: 'ventas' (productos) o 'servicios' (reservas por hora)
     modelo_negocio TEXT NOT NULL DEFAULT 'ventas',

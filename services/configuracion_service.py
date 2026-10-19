@@ -7,6 +7,7 @@ from PIL import Image
 
 from config import APP_DATA_DIR
 from database.connection import get_db
+from ui.color_marca import COLOR_DEFECTO, normalizar as normalizar_color
 from utils.logger import logger
 
 # Extensiones que acepta "Cambiar logo..." / "Cambiar QR de Yape...".
@@ -64,6 +65,8 @@ class ConfiguracionService:
             columnas_config = {fila["name"] for fila in cur.fetchall()}
             if "qr_yape_path" not in columnas_config:
                 cur.execute("ALTER TABLE configuracion ADD COLUMN qr_yape_path TEXT")
+            if "color_marca" not in columnas_config:
+                cur.execute("ALTER TABLE configuracion ADD COLUMN color_marca TEXT NOT NULL DEFAULT ''")
 
     def _asegurar_fila_configuracion(self) -> None:
         with self.db.transaction() as cur:
@@ -102,6 +105,24 @@ class ConfiguracionService:
                    WHERE id = 1""",
                 (nombre_negocio, direccion, moneda, igv_porcentaje, ticket_pie, tema),
             )
+
+    # ----------------------------------------------- Color de marca ----
+    def obtener_color_marca(self) -> str:
+        """Color de marca guardado ('#rrggbb') o '' si el cliente no eligió ninguno."""
+        fila = self.db.get_connection().execute(
+            "SELECT color_marca FROM configuracion WHERE id = 1").fetchone()
+        return normalizar_color((fila["color_marca"] if fila else "") or "") or ""
+
+    def guardar_color_marca(self, color: str) -> None:
+        """Guarda el color de marca. '' (o el verde original) vuelve al verde de fábrica."""
+        if color:
+            normalizado = normalizar_color(color)
+            if not normalizado:
+                raise ConfiguracionError("El color no es válido (use el formato #RRGGBB).")
+            color = "" if normalizado == COLOR_DEFECTO else normalizado
+        with self.db.transaction() as cur:
+            cur.execute("UPDATE configuracion SET color_marca = ?, "
+                        "actualizado_en = datetime('now', 'localtime') WHERE id = 1", (color,))
 
     # ------------------------------------------------------ Imágenes ----
     def _guardar_imagen(self, ruta_origen: str, nombre_archivo: str) -> str:
