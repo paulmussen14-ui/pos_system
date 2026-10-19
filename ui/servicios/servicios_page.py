@@ -430,17 +430,17 @@ class ServiciosPage(QWidget):
         capa.setContentsMargins(0, ESPACIO_MD, 0, 0)
 
         tarjeta = Card("Mis servicios")
-        self.tabla = QTableWidget(0, 6)
-        self.tabla.setHorizontalHeaderLabels(["Servicio", "Opciones", "Duración", "Precio base", "Estado", ""])
+        self.tabla = QTableWidget(0, 5)
+        self.tabla.setHorizontalHeaderLabels(["Servicio", "Duración", "Precio base", "Estado", ""])
         encabezado = self.tabla.horizontalHeader()
         encabezado.setSectionResizeMode(0, QHeaderView.Stretch)
-        for columna in (1, 2, 3):
+        for columna in (1, 2):
             encabezado.setSectionResizeMode(columna, QHeaderView.ResizeToContents)
-        configurar_tabla_erp(self.tabla, derecha=(3,), centro=(2, 4), altura_fila=48)
+        configurar_tabla_erp(self.tabla, derecha=(2,), centro=(1, 3), altura_fila=48)
+        encabezado.setSectionResizeMode(3, QHeaderView.Fixed)
+        self.tabla.setColumnWidth(3, 110)
         encabezado.setSectionResizeMode(4, QHeaderView.Fixed)
-        self.tabla.setColumnWidth(4, 110)
-        encabezado.setSectionResizeMode(5, QHeaderView.Fixed)
-        self.tabla.setColumnWidth(5, 230)
+        self.tabla.setColumnWidth(4, 230)
         self.tabla.itemDoubleClicked.connect(lambda item: self._editar(self._filas[item.row()]))
         tarjeta.cuerpo.addWidget(self.tabla, 1)
 
@@ -459,19 +459,10 @@ class ServiciosPage(QWidget):
         self.tabla.setRowCount(len(self._filas))
         for i, servicio in enumerate(self._filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(servicio["nombre"]))
-            subs = self.service.listar_subservicios(servicio["id"])
-            n_efectos = sum(1 for s in subs if s.get("clase") != CLASE_TIPO)
-            n_tipos = sum(1 for s in subs if s.get("clase") == CLASE_TIPO)
-            n_prod = len(self.service.listar_productos(servicio["id"]))
-            opciones = " · ".join(x for x in (
-                f"{n_efectos} efecto(s)" if n_efectos else "",
-                f"{n_tipos} tipo(s) de servicio" if n_tipos else "",
-                f"{n_prod} producto(s)" if n_prod else "") if x)
-            self.tabla.setItem(i, 1, QTableWidgetItem(opciones or "—"))
-            self.tabla.setItem(i, 2, item_centro(texto_duracion(servicio["duracion_min"])))
-            self.tabla.setItem(i, 3, item_derecha(formatear_moneda(servicio["precio"], moneda)))
+            self.tabla.setItem(i, 1, item_centro(texto_duracion(servicio["duracion_min"])))
+            self.tabla.setItem(i, 2, item_derecha(formatear_moneda(servicio["precio"], moneda)))
             estado = StatusBadge("Activo", "ok") if servicio["activo"] else StatusBadge("Inactivo", "neutral")
-            self.tabla.setCellWidget(i, 4, estado)
+            self.tabla.setCellWidget(i, 3, estado)
 
             acciones = QWidget()
             fila = QHBoxLayout(acciones)
@@ -486,7 +477,7 @@ class ServiciosPage(QWidget):
                 compactar_boton(boton)
                 boton.clicked.connect(funcion)
                 fila.addWidget(boton)
-            self.tabla.setCellWidget(i, 5, acciones)
+            self.tabla.setCellWidget(i, 4, acciones)
 
     def _nuevo(self) -> None:
         moneda = self.config_service.obtener().get("moneda", "S/")
