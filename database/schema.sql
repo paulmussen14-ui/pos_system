@@ -33,7 +33,23 @@ CREATE TABLE IF NOT EXISTS configuracion (
     ticket_pie TEXT DEFAULT 'Gracias por su compra',
     tema TEXT NOT NULL DEFAULT 'claro',
     -- claro | oscuro
-    actualizado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    actualizado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    -- Modelo de negocio: 'ventas' (productos) o 'servicios' (reservas por hora)
+    modelo_negocio TEXT NOT NULL DEFAULT 'ventas',
+    -- Agenda de reservas (solo se usa en el modelo 'servicios'). agenda_dias: dígitos de los
+    -- días de atención, 0 = lunes ... 6 = domingo (sin comas: el migrador de columnas separa por comas)
+    agenda_hora_inicio TEXT NOT NULL DEFAULT '08:00',
+    agenda_hora_fin TEXT NOT NULL DEFAULT '20:00',
+    agenda_intervalo_min INTEGER NOT NULL DEFAULT 30,
+    agenda_dias TEXT NOT NULL DEFAULT '012345',
+    -- Envío de boletas por correo (SMTP)
+    smtp_host TEXT NOT NULL DEFAULT '',
+    smtp_puerto INTEGER NOT NULL DEFAULT 587,
+    smtp_seguridad TEXT NOT NULL DEFAULT 'starttls',
+    smtp_usuario TEXT NOT NULL DEFAULT '',
+    smtp_password TEXT NOT NULL DEFAULT '',
+    smtp_remitente_nombre TEXT NOT NULL DEFAULT '',
+    smtp_remitente_email TEXT NOT NULL DEFAULT ''
 );
 -- ------------------------------------------------------------
 -- CATEGORIAS
@@ -103,7 +119,8 @@ CREATE TABLE IF NOT EXISTS clientes (
     documento TEXT,
     telefono TEXT,
     direccion TEXT,
-    creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    email TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_clientes_nombre ON clientes(nombre);
 -- ------------------------------------------------------------
@@ -465,3 +482,112 @@ CREATE TABLE IF NOT EXISTS trabajador_movimientos (
 );
 CREATE INDEX IF NOT EXISTS idx_trab_mov ON trabajador_movimientos(trabajador_id, pago_id);
 CREATE INDEX IF NOT EXISTS idx_trab_pagos ON trabajador_pagos(trabajador_id);
+
+-- ------------------------------------------------------------
+-- SERVICIOS (catálogo del modelo 'servicios')
+-- producto_id apunta a un producto OCULTO (activo = 0, sin stock) que
+-- representa al servicio dentro de ventas/caja/reportes. No tiene FOREIGN KEY
+-- a propósito para no estorbar la limpieza de registros antiguos.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS servicios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    precio REAL NOT NULL DEFAULT 0,
+    duracion_min INTEGER NOT NULL DEFAULT 30,
+    producto_id INTEGER,
+    activo INTEGER NOT NULL DEFAULT 1,
+    creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ------------------------------------------------------------
+-- RESERVAS (agenda por hora)
+-- Guarda su propia copia de los datos de la boleta (número, total, método de
+-- pago), así la boleta se puede volver a generar y reenviar aunque la venta
+-- asociada ya haya sido eliminada por la limpieza de registros antiguos.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS reservas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,
+    hora_inicio TEXT NOT NULL,
+    hora_fin TEXT NOT NULL,
+    servicio_id INTEGER,
+    servicio_nombre TEXT NOT NULL,
+    precio REAL NOT NULL DEFAULT 0,
+    cliente_id INTEGER,
+    cliente_nombre TEXT NOT NULL,
+    cliente_telefono TEXT,
+    cliente_email TEXT,
+    notas TEXT,
+    estado TEXT NOT NULL DEFAULT 'reservada',
+    descuento REAL NOT NULL DEFAULT 0,
+    total REAL,
+    metodo_pago TEXT,
+    numero_boleta INTEGER,
+    venta_id INTEGER,
+    pagado_en TEXT,
+    boleta_enviada_a TEXT,
+    adelanto_aplicado REAL NOT NULL DEFAULT 0,
+    creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_reservas_fecha ON reservas(fecha, hora_inicio);
+
+-- ------------------------------------------------------------
+-- SUB-SERVICIOS: variantes o adicionales de un servicio, con costo extra que se
+-- suma al precio base (ej. servicio "Limpieza dental" + sub-servicio "Fluorización").
+-- producto_id: producto oculto que lo representa en ventas (ver SERVICIOS).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS subservicios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    servicio_id INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    precio REAL NOT NULL DEFAULT 0,
+    producto_id INTEGER,
+    activo INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_subservicios_servicio ON subservicios(servicio_id);
+
+-- ------------------------------------------------------------
+-- PRODUCTOS DE UN SERVICIO: lo que se usa/entrega al atender. Al cobrar descuentan
+-- stock. cobrar = 1 suma su precio de venta al total; cobrar = 0 significa que va
+-- incluido en el precio del servicio (solo descuenta stock).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS servicio_productos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    servicio_id INTEGER NOT NULL,
+    producto_id INTEGER NOT NULL,
+    cantidad REAL NOT NULL DEFAULT 1,
+    cobrar INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_servicio_productos_servicio ON servicio_productos(servicio_id);
+
+-- ------------------------------------------------------------
+-- RESERVA_ITEMS: sub-servicios y productos elegidos en una reserva (copia de nombre y
+-- precio del momento). tipo: subservicio | producto. El servicio base va en reservas.precio.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS reserva_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reserva_id INTEGER NOT NULL,
+    tipo TEXT NOT NULL,
+    referencia_id INTEGER,
+    nombre TEXT NOT NULL,
+    cantidad REAL NOT NULL DEFAULT 1,
+    precio_unitario REAL NOT NULL DEFAULT 0,
+    subtotal REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_reserva_items_reserva ON reserva_items(reserva_id);
+
+-- ------------------------------------------------------------
+-- RESERVA_PAGOS: adelantos recibidos al reservar (o después). estado:
+-- vigente (cuenta para el saldo) | devuelto (se devolvió al cancelar) | retenido (se quedó el negocio).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS reserva_pagos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reserva_id INTEGER NOT NULL,
+    monto REAL NOT NULL,
+    metodo_pago_id INTEGER,
+    metodo_nombre TEXT,
+    es_efectivo INTEGER NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'vigente',
+    fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_reserva_pagos_reserva ON reserva_pagos(reserva_id);

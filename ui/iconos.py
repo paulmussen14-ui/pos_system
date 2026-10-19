@@ -85,6 +85,14 @@ _TRAZOS = {
         '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1"/>'
     ),
     "menu": '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
+    "servicio": (
+        '<rect x="3" y="7" width="18" height="13" rx="2"/>'
+        '<path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/>'
+    ),
+    "correo": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+    "pdf": (
+        '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 13h6"/><path d="M9 17h4"/>'
+    ),
 }
 
 _CABECERA = (

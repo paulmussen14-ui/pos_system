@@ -20,6 +20,8 @@ from printing.ticket_printer import listar_impresoras_disponibles, TicketPrinter
 from printing.ticket_prueba import imprimir_ticket_de_prueba
 from printing.ticket_template import ancho_caracteres_por_papel
 from ui.configuracion.ticket_extras_dialog import TicketExtrasDialog
+from ui.configuracion.modelo_negocio_tab import ModeloNegocioTab
+from ui.configuracion.correo_tab import CorreoTab
 from ui.configuracion.respaldo_acciones import (
     exportar_productos_ui, importar_productos_ui, restaurar_backup_ui,
 )
@@ -30,6 +32,7 @@ TAMANO_PREVIEW = 64
 class ConfiguracionPage(QWidget):
 
     tema_cambiado = None  # se asigna desde MainWindow (callback)
+    modelo_cambiado = None  # se asigna desde MainWindow: se llama con 'ventas' | 'servicios'
 
     def __init__(self, usuario, parent=None):
         super().__init__(parent)
@@ -51,12 +54,20 @@ class ConfiguracionPage(QWidget):
         tabs = QTabWidget()
 
         tabs.addTab(self._tab_negocio(), "Negocio")
+        self.tab_modelo = ModeloNegocioTab()
+        self.tab_modelo.modelo_cambiado.connect(self._on_modelo_cambiado)
+        tabs.addTab(self.tab_modelo, "Modelo de negocio")
         tabs.addTab(self._tab_impresion(), "Impresión")
         tabs.addTab(self._tab_metodos_pago(), "Métodos de pago")
+        tabs.addTab(CorreoTab(), "Correo")
         tabs.addTab(self._tab_backups(), "Copias de seguridad")
         tabs.addTab(self._tab_seguridad(), "Seguridad")
         tabs.addTab(self._tab_desarrollo(), "Desarrollo")
         layout.addWidget(tabs)
+
+    def _on_modelo_cambiado(self, modelo: str) -> None:
+        if callable(self.modelo_cambiado):
+            self.modelo_cambiado(modelo)
 
     # -------------------------------------------------- Tab: Negocio ----
     def _tab_negocio(self) -> QWidget:

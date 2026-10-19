@@ -12,6 +12,30 @@ from utils.logger import logger
 # Extensiones que acepta "Cambiar logo..." / "Cambiar QR de Yape...".
 EXTENSIONES_IMAGEN = (".png", ".jpg", ".jpeg")
 
+# Modelos de negocio: "ventas" (productos con stock) o "servicios" (reservas por hora).
+MODELO_VENTAS = "ventas"
+MODELO_SERVICIOS = "servicios"
+MODELOS_NEGOCIO = (MODELO_VENTAS, MODELO_SERVICIOS)
+INTERVALOS_AGENDA_MIN = (15, 20, 30, 45, 60)
+
+SEGURIDAD_SMTP = ("ssl", "starttls", "ninguna")
+
+
+class ConfiguracionError(Exception):
+    """Error de validación al guardar la configuración (mensaje apto para el usuario)."""
+
+
+def _minutos(hhmm: str) -> int:
+    """'08:30' -> 510. Lanza ConfiguracionError si el formato no es HH:MM."""
+    try:
+        horas, minutos = hhmm.split(":")
+        horas, minutos = int(horas), int(minutos)
+    except (ValueError, AttributeError):
+        raise ConfiguracionError(f"La hora '{hhmm}' no es válida (use HH:MM).")
+    if not (0 <= horas <= 23 and 0 <= minutos <= 59):
+        raise ConfiguracionError(f"La hora '{hhmm}' no es válida.")
+    return horas * 60 + minutos
+
 
 class ConfiguracionService:
 
@@ -231,3 +255,72 @@ class ConfiguracionService:
     def alternar_metodo_pago(self, metodo_id: int, activo: bool) -> None:
         with self.db.transaction() as cur:
             cur.execute("UPDATE metodos_pago SET activo = ? WHERE id = ?", (int(activo), metodo_id))
+
+    # ------------------------------------------- Modelo de negocio ----
+    def obtener_modelo_negocio(self) -> str:
+        modelo = self.obtener().get("modelo_negocio") or MODELO_VENTAS
+        return modelo if modelo in MODELOS_NEGOCIO else MODELO_VENTAS
+
+    def obtener_agenda(self) -> dict:
+        """Horario de atención de la agenda: hora_inicio/hora_fin ('HH:MM'),
+        intervalo_min y dias (lista de enteros, 0 = lunes ... 6 = domingo)."""
+        config = self.obtener()
+        dias = [int(c) for c in (config.get("agenda_dias") or "") if c.isdigit() and int(c) <= 6]
+        return {
+            "hora_inicio": config.get("agenda_hora_inicio") or "08:00",
+            "hora_fin": config.get("agenda_hora_fin") or "20:00",
+            "intervalo_min": int(config.get("agenda_intervalo_min") or 30),
+            "dias": sorted(set(dias)) or [0, 1, 2, 3, 4],
+        }
+
+    def actualizar_modelo_negocio(self, modelo: str, hora_inicio: str, hora_fin: str,
+                                   intervalo_min: int, dias: list[int]) -> None:
+        if modelo not in MODELOS_NEGOCIO:
+            raise ConfiguracionError("Elige un modelo de negocio válido.")
+        if modelo == MODELO_SERVICIOS:
+            if _minutos(hora_inicio) >= _minutos(hora_fin):
+                raise ConfiguracionError("La hora de cierre debe ser posterior a la de apertura.")
+            if intervalo_min not in INTERVALOS_AGENDA_MIN:
+                raise ConfiguracionError("El intervalo de la agenda no es válido.")
+            if not dias:
+                raise ConfiguracionError("Marca al menos un día de atención.")
+        with self.db.transaction() as cur:
+            cur.execute(
+                """UPDATE configuracion SET
+                       modelo_negocio = ?, agenda_hora_inicio = ?, agenda_hora_fin = ?,
+                       agenda_intervalo_min = ?, agenda_dias = ?,
+                       actualizado_en = datetime('now', 'localtime')
+                   WHERE id = 1""",
+                (modelo, hora_inicio, hora_fin, int(intervalo_min),
+                 "".join(str(d) for d in sorted(set(dias)))),
+            )
+
+    # --------------------------------------------- Correo (SMTP) ----
+    def obtener_correo(self) -> dict:
+        config = self.obtener()
+        return {
+            "host": config.get("smtp_host") or "",
+            "puerto": int(config.get("smtp_puerto") or 587),
+            "seguridad": config.get("smtp_seguridad") or "starttls",
+            "usuario": config.get("smtp_usuario") or "",
+            "password": config.get("smtp_password") or "",
+            "remitente_nombre": config.get("smtp_remitente_nombre") or "",
+            "remitente_email": config.get("smtp_remitente_email") or "",
+        }
+
+    def actualizar_correo(self, host: str, puerto: int, seguridad: str, usuario: str,
+                           password: str, remitente_nombre: str, remitente_email: str) -> None:
+        if seguridad not in SEGURIDAD_SMTP:
+            raise ConfiguracionError("El tipo de seguridad del correo no es válido.")
+        if not (1 <= int(puerto) <= 65535):
+            raise ConfiguracionError("El puerto debe estar entre 1 y 65535.")
+        with self.db.transaction() as cur:
+            cur.execute(
+                """UPDATE configuracion SET
+                       smtp_host = ?, smtp_puerto = ?, smtp_seguridad = ?, smtp_usuario = ?,
+                       smtp_password = ?, smtp_remitente_nombre = ?, smtp_remitente_email = ?,
+                       actualizado_en = datetime('now', 'localtime')
+                   WHERE id = 1""",
+                (host.strip(), int(puerto), seguridad, usuario.strip(), password,
+                 remitente_nombre.strip(), remitente_email.strip()),
+            )

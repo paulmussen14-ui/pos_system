@@ -69,6 +69,7 @@ class TicketPreviewDialog(QDialog):
         layout.addWidget(self.texto)
 
         botones = QHBoxLayout()
+        self.layout_botones = botones  # las pantallas que heredan de este diálogo agregan aquí sus botones
         btn_cerrar = QPushButton("Cerrar")
         btn_cerrar.setProperty("class", "secondary")
         btn_cerrar.clicked.connect(self.accept)
@@ -76,6 +77,7 @@ class TicketPreviewDialog(QDialog):
 
         texto_boton = "Imprimir (2 copias)" if self.imprimir_dos_copias else "Imprimir"
         btn_imprimir = QPushButton(texto_boton)
+        self.btn_imprimir = btn_imprimir
         btn_imprimir.setProperty("class", "success")
         btn_imprimir.clicked.connect(self._imprimir)
         botones.addWidget(btn_imprimir)

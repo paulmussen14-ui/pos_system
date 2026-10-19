@@ -29,3 +29,9 @@ def texto_no_vacio(texto: str) -> bool:
 def formatear_moneda(monto: float, simbolo: str = "S/") -> str:
     monto = monto or 0
     return f"{simbolo} {monto:,.2f}"
+
+
+def es_email_valido(texto: str) -> bool:
+    """Revisión simple de formato (algo@dominio.ext); no comprueba que exista."""
+    import re
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", (texto or "").strip()))

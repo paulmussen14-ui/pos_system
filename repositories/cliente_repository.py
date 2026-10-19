@@ -24,7 +24,7 @@ class ClienteRepository:
         # No usa FTS a propósito: con FTS solo se encuentra por inicio de
         # palabra y un símbolo raro puede hacer fallar la consulta.
         filtro, params = filtro_por_palabras(
-            ["nombre", "telefono", "documento"], texto_busqueda
+            ["nombre", "telefono", "documento", "email"], texto_busqueda
         )
 
         query = "SELECT * FROM clientes"
@@ -49,16 +49,16 @@ class ClienteRepository:
     def crear(self, cliente: Cliente) -> int:
         with self.db.transaction() as cur:
             cur.execute(
-                "INSERT INTO clientes (nombre, documento, telefono, direccion) VALUES (?, ?, ?, ?)",
-                (cliente.nombre, cliente.documento, cliente.telefono, cliente.direccion),
+                "INSERT INTO clientes (nombre, documento, telefono, direccion, email) VALUES (?, ?, ?, ?, ?)",
+                (cliente.nombre, cliente.documento, cliente.telefono, cliente.direccion, cliente.email),
             )
             return cur.lastrowid
 
     def actualizar(self, cliente: Cliente) -> None:
         with self.db.transaction() as cur:
             cur.execute(
-                "UPDATE clientes SET nombre = ?, documento = ?, telefono = ?, direccion = ? WHERE id = ?",
-                (cliente.nombre, cliente.documento, cliente.telefono, cliente.direccion, cliente.id),
+                "UPDATE clientes SET nombre = ?, documento = ?, telefono = ?, direccion = ?, email = ? WHERE id = ?",
+                (cliente.nombre, cliente.documento, cliente.telefono, cliente.direccion, cliente.email, cliente.id),
             )
 
     def eliminar(self, cliente_id: int) -> None:

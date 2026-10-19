@@ -44,7 +44,7 @@ class ClienteFormDialog(QDialog):
         self.cliente_service = ClienteService()
         self.cliente = cliente
         self.setWindowTitle("Editar cliente" if cliente else "Nuevo cliente")
-        self.resize(380, 270)
+        self.resize(380, 300)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -52,12 +52,15 @@ class ClienteFormDialog(QDialog):
         self.input_nombre = QLineEdit()
         self.input_telefono = QLineEdit()
         self.input_direccion = QLineEdit()
+        self.input_email = QLineEdit()
+        self.input_email.setPlaceholderText("Para enviarle boletas (opcional)")
         self.input_documento = QLineEdit()
         self.input_documento.setPlaceholderText("DNI o RUC (opcional)")
 
         form.addRow("Nombre:", self.input_nombre)
         form.addRow("Documento (DNI/RUC):", self.input_documento)
         form.addRow("Teléfono:", self.input_telefono)
+        form.addRow("Correo:", self.input_email)
         form.addRow("Dirección:", self.input_direccion)
         layout.addLayout(form)
 
@@ -66,6 +69,7 @@ class ClienteFormDialog(QDialog):
             self.input_telefono.setText(cliente.telefono or "")
             self.input_direccion.setText(cliente.direccion or "")
             self.input_documento.setText(cliente.documento or "")
+            self.input_email.setText(cliente.email or "")
 
         botones = QHBoxLayout()
         btn_cancelar = QPushButton("Cancelar")
@@ -83,13 +87,13 @@ class ClienteFormDialog(QDialog):
                 self.cliente_service.actualizar(
                     self.cliente.id, self.input_nombre.text(),
                     self.input_telefono.text(), self.input_direccion.text(),
-                    self.input_documento.text(),
+                    self.input_documento.text(), email=self.input_email.text(),
                 )
             else:
                 self.cliente_service.crear(
                     self.input_nombre.text(),
                     self.input_telefono.text(), self.input_direccion.text(),
-                    self.input_documento.text(),
+                    self.input_documento.text(), email=self.input_email.text(),
                 )
         except ClienteError as e:
             QMessageBox.warning(self, "Error", str(e))

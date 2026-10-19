@@ -22,7 +22,9 @@ from ui.rrhh.rrhh_page import RrhhPage
 from ui.proformas.proformas_page import ProformasPage
 from ui.cupones.cupones_page import CuponesPage
 from ui.configuracion.configuracion_page import ConfiguracionPage
-from services.configuracion_service import ConfiguracionService
+from ui.reservas.agenda_page import AgendaPage
+from ui.servicios.servicios_page import ServiciosPage
+from services.configuracion_service import ConfiguracionService, MODELO_SERVICIOS, MODELO_VENTAS
 from ui.tema_iconos import componer_tema
 from ui.iconos import icono_menu, icono
 from ui.tokens import paleta, ANCHO_SIDEBAR, ESPACIO_SM, ESPACIO_MD, ESPACIO_LG
@@ -59,10 +61,17 @@ MENU_INICIO = ("Inicio", "inicio")
 MENU_GRUPOS = [
     ("OPERACIÓN", [("Ventas", "carrito"), ("Proformas", "ticket"), ("Caja", "caja_registradora"),
                   ("Clientes", "clientes")]),
+    ("SERVICIOS", [("Servicios", "servicio")]),
     ("INVENTARIO", [("Productos", "producto"), ("Compras", "compras"), ("Inventario", "inventario")]),
     ("ADMINISTRACIÓN", [("RRHH", "usuario"), ("Cupones", "etiqueta"), ("Reportes", "reportes"),
                         ("Configuración", "configuracion")]),
 ]
+
+# Qué se ve en el menú según el modelo de negocio (Configuración → Modelo de negocio).
+# Lo que no está en ninguna lista se ve siempre (Inicio, Caja, Clientes, RRHH, Reportes, Configuración).
+# Productos, Compras e Inventario se quedan: los servicios pueden usar productos (descuentan stock).
+PAGINAS_SOLO_VENTAS = {"Ventas", "Proformas", "Cupones"}
+PAGINAS_SOLO_SERVICIOS = {"Servicios"}
 
 
 class MainWindow(QMainWindow):
@@ -75,6 +84,8 @@ class MainWindow(QMainWindow):
         self._tema_actual = "claro"
         self._iconos_menu = {}      # nombre de página -> (botón, nombre del ícono)
         self._logo_cargado = None   # (ruta, fecha de modificación) del logo mostrado
+        self._modelo = self.config_service.obtener_modelo_negocio()
+        self._titulos_grupo = {}    # título del grupo -> (etiqueta, nombres de sus páginas)
 
         self.setWindowTitle("Sistema POS Local - FayzerDEV")
         if APP_ICON_PATH.exists():
@@ -121,6 +132,7 @@ class MainWindow(QMainWindow):
             "Proformas": lambda: ProformasPage(self.usuario),
             "Cupones": lambda: CuponesPage(self.usuario),
             "Configuración": lambda: ConfiguracionPage(self.usuario),
+            "Servicios": lambda: ServiciosPage(self.usuario),
         }
 
         layout_sidebar.addSpacing(ESPACIO_SM)
@@ -129,10 +141,18 @@ class MainWindow(QMainWindow):
             etiqueta = QLabel(titulo_grupo)
             etiqueta.setObjectName("sidebarSection")
             layout_sidebar.addWidget(etiqueta)
+            self._titulos_grupo[titulo_grupo] = (etiqueta, [nombre for nombre, _ in items])
             for item in items:
                 self._agregar_item_menu(layout_sidebar, item, paginas_por_nombre)
 
+        # La agenda reemplaza al Inicio cuando el negocio trabaja con servicios: no tiene
+        # botón propio, se llega a ella con "Inicio" (ver _navegar).
+        self.paginas["Agenda"] = AgendaPage(self.usuario)
+        self.stack.addWidget(self.paginas["Agenda"])
+        self.paginas["Agenda"].navegar = self.ir_a
+
         self.paginas["Configuración"].tema_cambiado = self._aplicar_tema
+        self.paginas["Configuración"].modelo_cambiado = self._aplicar_modelo_negocio
         # Los accesos rápidos y enlaces "ver más" del Inicio abren otras pantallas.
         self.paginas["Inicio"].navegar = self.ir_a
         # Proformas ↔ Ventas: convertir carga la proforma en el carrito de Ventas.
@@ -171,7 +191,7 @@ class MainWindow(QMainWindow):
         # Seleccionar "Inicio" por defecto
         primer_boton = self.grupo_botones.buttons()[0]
         primer_boton.setChecked(True)
-        self.stack.setCurrentIndex(0)
+        self._aplicar_modelo_negocio(self._modelo, inicial=True)
 
     def _crear_encabezado_sidebar(self) -> QWidget:
         """Logo del negocio a todo el ancho arriba; debajo, nombre del negocio y usuario.
@@ -222,21 +242,22 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(4)
 
-        titulo = QLabel("¿Listo para vender?")
-        titulo.setObjectName("sidebarCardTitulo")
-        layout.addWidget(titulo)
-        texto = QLabel("Registra una venta en segundos.")
-        texto.setObjectName("sidebarCardTexto")
-        texto.setWordWrap(True)
-        layout.addWidget(texto)
+        self.tarjeta_titulo = QLabel("¿Listo para vender?")
+        self.tarjeta_titulo.setObjectName("sidebarCardTitulo")
+        layout.addWidget(self.tarjeta_titulo)
+        self.tarjeta_texto = QLabel("Registra una venta en segundos.")
+        self.tarjeta_texto.setObjectName("sidebarCardTexto")
+        self.tarjeta_texto.setWordWrap(True)
+        layout.addWidget(self.tarjeta_texto)
         layout.addSpacing(6)
 
         boton = QPushButton("  Nueva venta")
+        self.tarjeta_boton = boton
         boton.setObjectName("btnNuevaVenta")
         boton.setCursor(Qt.PointingHandCursor)
         boton.setIconSize(QSize(18, 18))
         boton.setIcon(icono("mas", "#ffffff", 18))
-        boton.clicked.connect(lambda: self.ir_a("Ventas"))
+        boton.clicked.connect(self._accion_tarjeta)
         layout.addWidget(boton)
 
         contenedor = QWidget()
@@ -320,6 +341,51 @@ class MainWindow(QMainWindow):
         if hasattr(self, "tarjeta_venta"):
             self.tarjeta_venta.setVisible(self.height() >= ALTO_MINIMO_TARJETA_MENU)
 
+    def _accion_tarjeta(self) -> None:
+        """Botón de la tarjeta del menú: nueva venta, o nueva reserva si el negocio da servicios."""
+        if self._modelo == MODELO_SERVICIOS:
+            self.ir_a("Inicio")
+            self.paginas["Agenda"].nueva_reserva()
+        else:
+            self.ir_a("Ventas")
+
+    def _aplicar_modelo_negocio(self, modelo: str, inicial: bool = False) -> None:
+        """Adapta el menú y el Inicio al modelo de negocio: ventas (productos) o
+        servicios (reservas). No borra datos; solo muestra u oculta pantallas."""
+        self._modelo = modelo if modelo in (MODELO_VENTAS, MODELO_SERVICIOS) else MODELO_VENTAS
+        servicios = self._modelo == MODELO_SERVICIOS
+
+        ocultas = PAGINAS_SOLO_VENTAS if servicios else PAGINAS_SOLO_SERVICIOS
+        for nombre in PAGINAS_SOLO_VENTAS | PAGINAS_SOLO_SERVICIOS:
+            boton, _ = self._iconos_menu[nombre]
+            boton.setVisible(nombre not in ocultas)
+        for etiqueta, nombres in self._titulos_grupo.values():
+            etiqueta.setVisible(any(n not in ocultas for n in nombres))
+
+        # "Inicio" pasa a ser la agenda.
+        boton_inicio, _ = self._iconos_menu["Inicio"]
+        boton_inicio.setText("  Agenda" if servicios else "  Inicio")
+        self._iconos_menu["Inicio"] = (boton_inicio, "calendario" if servicios else "inicio")
+
+        if servicios:
+            self.tarjeta_titulo.setText("¿Nueva cita?")
+            self.tarjeta_texto.setText("Reserva una hora en segundos.")
+            self.tarjeta_boton.setText("  Nueva reserva")
+        else:
+            self.tarjeta_titulo.setText("¿Listo para vender?")
+            self.tarjeta_texto.setText("Registra una venta en segundos.")
+            self.tarjeta_boton.setText("  Nueva venta")
+
+        self._actualizar_iconos_menu(self._tema_actual)
+        if inicial:
+            self.stack.setCurrentIndex(list(self.paginas.keys()).index("Agenda" if servicios else "Inicio"))
+        else:
+            # Si la pantalla abierta ya no existe en este modelo (o es el Inicio/Agenda,
+            # que cambia de cara), ir al Inicio; si no, quedarse donde estaba.
+            actual = list(self.paginas.keys())[self.stack.currentIndex()]
+            if actual in ocultas or actual in ("Inicio", "Agenda"):
+                self.ir_a("Inicio")
+
     def _convertir_proforma(self, proforma: dict) -> None:
         self.paginas["Ventas"].cargar_proforma(proforma)
         self.ir_a("Ventas")
@@ -397,6 +463,8 @@ class MainWindow(QMainWindow):
             self.label_inicial.setVisible(True)
 
     def _navegar(self, nombre_pagina: str) -> None:
+        if nombre_pagina == "Inicio" and self._modelo == MODELO_SERVICIOS:
+            nombre_pagina = "Agenda"
         indice = list(self.paginas.keys()).index(nombre_pagina)
         self.stack.setCurrentIndex(indice)
         self._actualizar_encabezado()

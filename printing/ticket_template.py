@@ -199,8 +199,15 @@ def generar_texto_ticket(
         lineas.append(c["bold_on"] + marca + c["bold_off"] if esc_pos else marca)
         lineas.append("-" * ancho_caracteres)
 
-    lineas.append(f"Venta #{venta['id']}")
+    # titulo_documento / numero_documento: opcionales (las boletas de servicio los
+    # usan para decir "Boleta B001-000012" en vez de "Venta #12").
+    titulo_documento = venta.get("titulo_documento") or "Venta"
+    numero_documento = venta.get("numero_documento") or f"#{venta['id']}"
+    lineas.append(f"{titulo_documento} {numero_documento}")
     lineas.append(f"Fecha: {venta['fecha']}")
+    # lineas_extra: opcional, líneas de texto adicionales (ej. la fecha y hora de la cita).
+    for extra in venta.get("lineas_extra") or []:
+        lineas.extend(_lineas_envueltas(extra, ancho_caracteres))
     if venta.get("cliente_nombre"):
         tipo_libre = venta.get("cliente_libre_tipo")
         etiqueta_cliente = f"{venta['cliente_nombre']} ({tipo_libre})" if tipo_libre else venta["cliente_nombre"]
@@ -254,6 +261,9 @@ def generar_texto_ticket(
 
     total_str = alinear_derecha(f"TOTAL: {formatear_moneda(venta['total'], moneda)}", ancho_caracteres)
     lineas.append(c["bold_on"] + total_str + c["bold_off"] if esc_pos else total_str)
+    # lineas_pago: opcional, líneas a la derecha bajo el total (ej. adelantos y saldo pagado).
+    for extra in venta.get("lineas_pago") or []:
+        lineas.append(alinear_derecha(extra, ancho_caracteres))
     lineas.append("=" * ancho_caracteres)
 
     if venta.get("metodo_pago_nombre"):

@@ -61,6 +61,39 @@ pos_system/
 Ver `arquitectura_pos_pyside6.md` para el detalle completo de arquitectura,
 modelo de datos y flujos de negocio.
 
+## Modelos de negocio: ventas o servicios con reservas
+
+En **Configuración → Modelo de negocio** se elige cómo trabaja el negocio:
+
+- **Ventas de productos**: el sistema de siempre (Inicio con resumen, Ventas, Productos, Compras, Inventario...).
+- **Servicios con reserva** (consultorios, salones, talleres, clases...): el **Inicio pasa a ser una
+  agenda semanal por horas**. Se ocultan Ventas, Proformas y Cupones, y
+  aparece **Servicios**. Productos, Compras e Inventario se mantienen porque los servicios pueden usar productos.
+
+Cambiar de modelo no borra nada; solo cambia el menú y el Inicio. El horario de atención (apertura,
+cierre, bloques de 15-60 min y días) se define en la misma pestaña.
+
+Flujo de una reserva: clic en una hora libre → elegir servicio y cliente → la reserva queda en la
+agenda → al atender, **Cobrar y generar boleta** (método de pago, descuento opcional) → la boleta se
+puede **ver/imprimir como ticket, guardar en PDF o enviar por correo**. El cobro queda registrado en
+Caja (si es efectivo) y en Reportes como cualquier venta.
+
+**Correo**: Configuración → Correo (servidor SMTP; Gmail/Outlook/Yahoo vienen precargados y requieren
+una «contraseña de aplicación»). Es lo único que usa Internet, y solo al enviar. Los PDF se guardan
+también en `%APPDATA%\POSLocal\boletas\`.
+
+**Sub-servicios y productos** (Servicios → editar): cada servicio tiene un *precio base* y puede tener
+*sub-servicios* (cada uno con su costo adicional, que se suma al base) y *productos* que se usan al
+atender. Al cobrar, los productos descuentan stock; cada uno se marca como «Cobrar aparte» (suma su
+precio de venta) o va incluido en el precio del servicio.
+
+**Adelantos**: al reservar (o después, con «Recibir adelanto») se escribe el monto que deja el cliente
+y con qué pagó. Si es en efectivo entra a la caja abierta. Al cobrar solo se paga el **saldo**
+(total − adelantos) y la boleta muestra los adelantos. Si la reserva se cancela, se decide si el
+adelanto se **devuelve** (sale de la caja si fue en efectivo) o se **retiene**.
+
+> La boleta es un **comprobante interno de atención**, no un comprobante electrónico de SUNAT.
+
 ## Generar el ejecutable (.exe)
 
 ```bash

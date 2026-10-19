@@ -9,6 +9,7 @@ class Cliente:
     documento: Optional[str]
     telefono: Optional[str]
     direccion: Optional[str]
+    email: Optional[str] = None
 
     @classmethod
     def from_row(cls, row) -> "Cliente":
@@ -18,4 +19,5 @@ class Cliente:
             documento=row["documento"],
             telefono=row["telefono"],
             direccion=row["direccion"],
+            email=row["email"] if "email" in row.keys() else None,
         )
