@@ -532,19 +532,33 @@ CREATE TABLE IF NOT EXISTS reservas (
 CREATE INDEX IF NOT EXISTS idx_reservas_fecha ON reservas(fecha, hora_inicio);
 
 -- ------------------------------------------------------------
--- SUB-SERVICIOS: variantes o adicionales de un servicio, con costo extra que se
--- suma al precio base (ej. servicio "Limpieza dental" + sub-servicio "Fluorización").
--- producto_id: producto oculto que lo representa en ventas (ver SERVICIOS).
+-- OPCIONES (tabla subservicios): CATÁLOGO GLOBAL de adicionales, definidos una sola vez
+-- y compartidos por todos los servicios (ver servicio_subservicios). Tienen un costo extra
+-- que se suma al precio base (NUNCA vienen incluidos en el precio del servicio) y dos clases:
+--   'efecto' = se cobra aparte y se pueden elegir varios a la vez (ej. "Ojo de gato").
+--   'tipo'   = otra modalidad del servicio, sin ser un efecto; se elige uno solo (ej. "Esculpidas").
+-- servicio_id: columna LEGADA (antes cada opción pertenecía a un servicio). Hoy siempre es 0;
+--   qué servicios usan la opción lo dice servicio_subservicios.
+-- producto_id: producto oculto que la representa en ventas (ver SERVICIOS).
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS subservicios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    servicio_id INTEGER NOT NULL,
+    servicio_id INTEGER NOT NULL DEFAULT 0,
     nombre TEXT NOT NULL,
     precio REAL NOT NULL DEFAULT 0,
     producto_id INTEGER,
-    activo INTEGER NOT NULL DEFAULT 1
+    activo INTEGER NOT NULL DEFAULT 1,
+    clase TEXT NOT NULL DEFAULT 'efecto'
 );
 CREATE INDEX IF NOT EXISTS idx_subservicios_servicio ON subservicios(servicio_id);
+
+-- Qué opciones del catálogo aplican a cada servicio (cada servicio solo marca cuáles).
+CREATE TABLE IF NOT EXISTS servicio_subservicios (
+    servicio_id INTEGER NOT NULL,
+    subservicio_id INTEGER NOT NULL,
+    PRIMARY KEY (servicio_id, subservicio_id)
+);
+CREATE INDEX IF NOT EXISTS idx_serv_sub_opcion ON servicio_subservicios(subservicio_id);
 
 -- ------------------------------------------------------------
 -- PRODUCTOS DE UN SERVICIO: lo que se usa/entrega al atender. Al cobrar descuentan

@@ -185,8 +185,13 @@ class ReservaService:
         subservicio_ids = set(subservicio_ids or [])
         producto_ids = set(producto_ids or [])
         if subservicio_ids:
+            tipos_elegidos = 0
             for sub in self.servicio_service.listar_subservicios(servicio_id, solo_activos=False):
                 if sub["id"] in subservicio_ids:
+                    if sub.get("clase") == "tipo":
+                        tipos_elegidos += 1
+                        if tipos_elegidos > 1:
+                            raise ReservaError("Elige un solo tipo de servicio (los efectos sí pueden ser varios).")
                     items.append({"tipo": "subservicio", "referencia_id": sub["id"], "nombre": sub["nombre"],
                                   "cantidad": 1, "precio_unitario": sub["precio"], "subtotal": sub["precio"]})
         if producto_ids:

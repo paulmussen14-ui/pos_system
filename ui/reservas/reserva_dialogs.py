@@ -19,7 +19,7 @@ from services.configuracion_service import ConfiguracionService
 from services.reserva_service import (
     ReservaService, ReservaError, ESTADO_RESERVADA, ESTADO_ATENDIDA, ESTADO_NO_ASISTIO,
 )
-from services.servicio_service import ServicioService
+from services.servicio_service import ServicioService, CLASE_TIPO
 from ui.widgets.status_badge import StatusBadge
 from ui.widgets.ticket_preview_dialog import TicketPreviewDialog
 from utils.fechas import a_hhmm, a_minutos, fecha_larga, parsear_fecha
@@ -129,8 +129,9 @@ class BoletaDialog(TicketPreviewDialog):
 # Nueva reserva / editar
 # ====================================================================
 class ReservaDialog(QDialog):
-    """Reservar una hora (o editar una reserva). Permite elegir sub-servicios (suman su costo),
-    quitar productos del servicio y, al crear, recibir un adelanto del monto que se escriba."""
+    """Reservar una hora (o editar una reserva). Permite elegir un tipo de servicio (uno solo) y
+    efectos (varios), que se cobran aparte y suman su costo; quitar productos del servicio y,
+    al crear, recibir un adelanto del monto que se escriba."""
 
     def __init__(self, fecha: date, hora: str, reserva: dict | None = None, usuario=None, parent=None):
         super().__init__(parent)
@@ -209,11 +210,16 @@ class ReservaDialog(QDialog):
         self.input_precio.valueChanged.connect(self._actualizar_total)
         formulario.addRow("Precio base:", self.input_precio)
 
-        self.lista_sub = QListWidget()
-        self.lista_sub.setMaximumHeight(112)
-        self.lista_sub.itemChanged.connect(self._actualizar_total)
-        self.etiqueta_sub = QLabel("Sub-servicios:")
-        formulario.addRow(self.etiqueta_sub, self.lista_sub)
+        self.combo_tipo = QComboBox()
+        self.combo_tipo.currentIndexChanged.connect(self._actualizar_total)
+        self.etiqueta_tipo = QLabel("Tipo de servicio:")
+        formulario.addRow(self.etiqueta_tipo, self.combo_tipo)
+
+        self.lista_efectos = QListWidget()
+        self.lista_efectos.setMaximumHeight(112)
+        self.lista_efectos.itemChanged.connect(self._actualizar_total)
+        self.etiqueta_efectos = QLabel("Efectos:")
+        formulario.addRow(self.etiqueta_efectos, self.lista_efectos)
 
         self.lista_prod = QListWidget()
         self.lista_prod.setMaximumHeight(112)
@@ -292,22 +298,35 @@ class ReservaDialog(QDialog):
 
     def _llenar_extras(self, servicio_id: int, marcados_sub: set | None = None,
                        marcados_prod: set | None = None) -> None:
-        """Muestra los sub-servicios y productos del servicio elegido. Por defecto ningún
-        sub-servicio está marcado y todos los productos sí; al editar se respeta lo guardado."""
-        self.lista_sub.blockSignals(True)
+        """Muestra los tipos de servicio, efectos y productos del servicio elegido. Por defecto
+        no hay tipo ni efecto elegido y todos los productos sí; al editar se respeta lo guardado.
+        Tipos y efectos se cobran aparte: nunca vienen incluidos en el precio base."""
+        marcados_sub = marcados_sub or set()
+        self.combo_tipo.blockSignals(True)
+        self.lista_efectos.blockSignals(True)
         self.lista_prod.blockSignals(True)
-        self.lista_sub.clear()
+        self.combo_tipo.clear()
+        self.lista_efectos.clear()
         self.lista_prod.clear()
 
+        self.combo_tipo.addItem("Ninguno", None)
+        hay_tipos = False
         subs = self.servicio_service.listar_subservicios(servicio_id, solo_activos=False)
         for sub in subs:
-            if not sub["activo"] and sub["id"] not in (marcados_sub or set()):
+            if not sub["activo"] and sub["id"] not in marcados_sub:
                 continue
-            item = QListWidgetItem(f"{sub['nombre']}  (+{self.moneda} {sub['precio']:.2f})")
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if sub["id"] in (marcados_sub or set()) else Qt.Unchecked)
-            item.setData(Qt.UserRole, sub)
-            self.lista_sub.addItem(item)
+            texto = f"{sub['nombre']}  (+{self.moneda} {sub['precio']:.2f})"
+            if sub.get("clase") == CLASE_TIPO:
+                hay_tipos = True
+                self.combo_tipo.addItem(texto, sub)
+                if sub["id"] in marcados_sub:
+                    self.combo_tipo.setCurrentIndex(self.combo_tipo.count() - 1)
+            else:
+                item = QListWidgetItem(texto)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked if sub["id"] in marcados_sub else Qt.Unchecked)
+                item.setData(Qt.UserRole, sub)
+                self.lista_efectos.addItem(item)
 
         for prod in self.servicio_service.listar_productos(servicio_id):
             detalle = (f"+{self.moneda} {prod['precio'] * prod['cantidad']:.2f}" if prod["cobrar"]
@@ -319,9 +338,13 @@ class ReservaDialog(QDialog):
             item.setData(Qt.UserRole, prod)
             self.lista_prod.addItem(item)
 
-        self.lista_sub.blockSignals(False)
+        self.combo_tipo.blockSignals(False)
+        self.lista_efectos.blockSignals(False)
         self.lista_prod.blockSignals(False)
-        for lista, etiqueta in ((self.lista_sub, self.etiqueta_sub), (self.lista_prod, self.etiqueta_prod)):
+        self.combo_tipo.setVisible(hay_tipos)
+        self.etiqueta_tipo.setVisible(hay_tipos)
+        for lista, etiqueta in ((self.lista_efectos, self.etiqueta_efectos),
+                                (self.lista_prod, self.etiqueta_prod)):
             visible = lista.count() > 0
             lista.setVisible(visible)
             etiqueta.setVisible(visible)
@@ -366,11 +389,22 @@ class ReservaDialog(QDialog):
         return [lista.item(i).data(Qt.UserRole)[clave] for i in range(lista.count())
                 if lista.item(i).checkState() == Qt.Checked]
 
+    def _subservicio_ids(self) -> list[int]:
+        """Ids de los efectos marcados (varios) más el tipo de servicio elegido (uno solo)."""
+        ids = self._ids_marcados(self.lista_efectos, "id")
+        tipo = self.combo_tipo.currentData()
+        if tipo:
+            ids.append(tipo["id"])
+        return ids
+
     def _total(self) -> float:
         total = self.input_precio.value()
-        for i in range(self.lista_sub.count()):
-            if self.lista_sub.item(i).checkState() == Qt.Checked:
-                total += self.lista_sub.item(i).data(Qt.UserRole)["precio"]
+        tipo = self.combo_tipo.currentData()
+        if tipo:
+            total += tipo["precio"]
+        for i in range(self.lista_efectos.count()):
+            if self.lista_efectos.item(i).checkState() == Qt.Checked:
+                total += self.lista_efectos.item(i).data(Qt.UserRole)["precio"]
         for i in range(self.lista_prod.count()):
             item = self.lista_prod.item(i)
             prod = item.data(Qt.UserRole)
@@ -443,7 +477,7 @@ class ReservaDialog(QDialog):
             notas=self.input_notas.text(),
             cliente_id=self._cliente_id,
             guardar_cliente=self.check_guardar_cliente.isChecked(),
-            subservicio_ids=self._ids_marcados(self.lista_sub, "id"),
+            subservicio_ids=self._subservicio_ids(),
             producto_ids=self._ids_marcados(self.lista_prod, "producto_id"),
         )
         try:

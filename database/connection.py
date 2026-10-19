@@ -46,8 +46,45 @@ class DatabaseConnection:
         self.conn.commit()
         sql_sin_comentarios = re.sub(r"--[^\n]*", "", schema_sql)
         self._migrar_columnas_faltantes(sql_sin_comentarios)
+        self._migrar_opciones_globales()
         self._poblar_fts_si_vacio("clientes_fts", "clientes")
         self._poblar_fts_si_vacio("productos_fts", "productos")
+
+    def _migrar_opciones_globales(self) -> None:
+        """Pasa las opciones (sub-servicios) que antes vivían dentro de cada servicio al
+        catálogo global, sin repetir datos.
+
+        Antes cada sub-servicio tenía un servicio_id. Ahora son un catálogo único y la tabla
+        servicio_subservicios dice a qué servicios aplica cada uno. Las filas antiguas son las
+        que aún tienen servicio_id > 0: se enlazan y se les pone servicio_id = 0, así que en
+        arranques posteriores no queda nada por migrar (es seguro repetirlo).
+
+        Si el mismo adicional (mismo nombre, clase y costo) estaba repetido en varios
+        servicios, queda una sola opción enlazada a todos; las reservas que apuntaban a la
+        copia se reapuntan a la que se conserva.
+        """
+        c = self.conn
+        antiguas = c.execute(
+            "SELECT id, servicio_id, nombre, precio, clase, activo FROM subservicios "
+            "WHERE servicio_id > 0 ORDER BY activo DESC, id"
+        ).fetchall()
+        if not antiguas:
+            return
+        conservadas: dict[tuple, int] = {}
+        for fila in antiguas:
+            clave = (" ".join((fila["nombre"] or "").lower().split()), fila["clase"],
+                     round(fila["precio"] or 0, 2))
+            id_final = conservadas.setdefault(clave, fila["id"])
+            if fila["activo"] or id_final == fila["id"]:
+                c.execute(
+                    "INSERT OR IGNORE INTO servicio_subservicios (servicio_id, subservicio_id) "
+                    "VALUES (?, ?)", (fila["servicio_id"], id_final))
+            if id_final != fila["id"]:
+                c.execute("UPDATE reserva_items SET referencia_id = ? "
+                          "WHERE tipo = 'subservicio' AND referencia_id = ?", (id_final, fila["id"]))
+                c.execute("UPDATE subservicios SET activo = 0 WHERE id = ?", (fila["id"],))
+            c.execute("UPDATE subservicios SET servicio_id = 0 WHERE id = ?", (fila["id"],))
+        c.commit()
 
     def _poblar_fts_si_vacio(self, tabla_fts: str, tabla_origen: str) -> None:
         """Puebla la tabla FTS solo la primera vez (cuando está vacía).

@@ -1,15 +1,19 @@
 """Servicios: el catálogo de lo que ofrece un negocio que trabaja con reservas
-(consulta, corte de cabello, sesión, clase...). Cada servicio tiene precio y duración."""
+(consulta, corte de cabello, sesión, clase...). Cada servicio tiene precio y duración.
 
-from PySide6.QtCore import Qt
+Las opciones (efectos y tipos de servicio) se definen UNA sola vez en su propio catálogo
+(pestaña «Opciones») y cada servicio solo marca cuáles le aplican, así no se repiten datos."""
+
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QDialog, QFormLayout, QDoubleSpinBox, QSpinBox,
-    QMessageBox, QTabWidget, QComboBox, QCheckBox, QAbstractItemView,
+    QMessageBox, QTabWidget, QComboBox, QCheckBox, QAbstractItemView, QListWidget,
+    QListWidgetItem,
 )
 
 from services.configuracion_service import ConfiguracionService
-from services.servicio_service import ServicioService, ServicioError
+from services.servicio_service import ServicioService, ServicioError, CLASE_EFECTO, CLASE_TIPO
 from ui.tokens import MARGEN_PAGINA, ESPACIO_MD
 from ui.widgets.card import Card
 from ui.widgets.page_header import PageHeader
@@ -28,9 +32,14 @@ def texto_duracion(minutos: int) -> str:
     return f"{resto} min"
 
 
+def texto_clase(clase: str) -> str:
+    return "Tipo de servicio" if clase == CLASE_TIPO else "Efecto"
+
+
 class ServicioDialog(QDialog):
     """Formulario del servicio con tres pestañas: datos básicos (precio base y duración),
-    sub-servicios (cada uno con su costo adicional) y productos que se usan al atender."""
+    opciones (marca cuáles efectos y tipos de servicio del catálogo aplican) y productos
+    que se usan al atender."""
 
     def __init__(self, service: ServicioService, servicio: dict | None = None,
                  moneda: str = "S/", parent=None):
@@ -39,13 +48,14 @@ class ServicioDialog(QDialog):
         self.servicio = servicio
         self.moneda = moneda
         self._productos_disponibles = service.listar_productos_disponibles()
+        self._catalogo = service.listar_opciones(solo_activas=False)
         self.setWindowTitle("Editar servicio" if servicio else "Nuevo servicio")
         self.resize(560, 470)
 
         raiz = QVBoxLayout(self)
         pestanas = QTabWidget()
         pestanas.addTab(self._pestana_datos(), "Datos")
-        pestanas.addTab(self._pestana_subservicios(), "Sub-servicios")
+        pestanas.addTab(self._pestana_opciones(), "Opciones")
         pestanas.addTab(self._pestana_productos(), "Productos")
         raiz.addWidget(pestanas, 1)
 
@@ -53,8 +63,6 @@ class ServicioDialog(QDialog):
             self.input_nombre.setText(servicio["nombre"])
             self.input_precio.setValue(servicio["precio"])
             self.input_duracion.setValue(servicio["duracion_min"])
-            for sub in service.listar_subservicios(servicio["id"]):
-                self._agregar_subservicio(sub["id"], sub["nombre"], sub["precio"])
             for prod in service.listar_productos(servicio["id"]):
                 self._agregar_producto(prod["producto_id"], prod["cantidad"], bool(prod["cobrar"]))
 
@@ -82,7 +90,7 @@ class ServicioDialog(QDialog):
         self.input_precio.setMaximum(999999)
         self.input_precio.setDecimals(2)
         self.input_precio.setPrefix(f"{self.moneda} ")
-        self.input_precio.setToolTip("Precio base. Los sub-servicios y productos cobrados aparte se suman a este.")
+        self.input_precio.setToolTip("Precio base. Los efectos, tipos de servicio y productos cobrados aparte se suman a este.")
         formulario.addRow("Precio base:", self.input_precio)
 
         self.input_duracion = QSpinBox()
@@ -94,23 +102,38 @@ class ServicioDialog(QDialog):
         formulario.addRow("Duración:", self.input_duracion)
         return pagina
 
-    def _pestana_subservicios(self) -> QWidget:
+    def _pestana_opciones(self) -> QWidget:
         pagina = QWidget()
         capa = QVBoxLayout(pagina)
-        ayuda = QLabel("Opcional. Variantes o adicionales de este servicio. Al reservar se marcan "
-                       "los que corresponden y su costo se suma al precio base.")
+        ayuda = QLabel("Marca los efectos y tipos de servicio que se pueden elegir en este servicio. "
+                       "Se crean una sola vez en la pestaña «Opciones» de esta pantalla; aquí solo "
+                       "eliges cuáles aplican. Nada viene incluido en el precio base: lo que se elija "
+                       "al reservar se suma aparte.")
         ayuda.setProperty("class", "ayuda")
         ayuda.setWordWrap(True)
         capa.addWidget(ayuda)
 
-        self.tabla_sub = QTableWidget(0, 2)
-        self.tabla_sub.setHorizontalHeaderLabels(["Sub-servicio", "Costo adicional"])
-        self.tabla_sub.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.tabla_sub.setColumnWidth(1, 150)
-        self._config_tabla_editable(self.tabla_sub)
-        capa.addWidget(self.tabla_sub, 1)
-        capa.addLayout(self._botones_tabla("+ Agregar sub-servicio", self._agregar_subservicio,
-                                           self.tabla_sub))
+        vinculadas = set()
+        if self.servicio:
+            vinculadas = {o["id"] for o in self.service.listar_subservicios(self.servicio["id"],
+                                                                            solo_activos=False)}
+        self.lista_opciones = QListWidget()
+        for opcion in self._catalogo:
+            if not opcion["activo"] and opcion["id"] not in vinculadas:
+                continue
+            item = QListWidgetItem(f"{opcion['nombre']}  ·  {texto_clase(opcion['clase'])}  "
+                                   f"(+{self.moneda} {opcion['precio']:.2f})")
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if opcion["id"] in vinculadas else Qt.Unchecked)
+            item.setData(Qt.UserRole, opcion["id"])
+            self.lista_opciones.addItem(item)
+        capa.addWidget(self.lista_opciones, 1)
+
+        if self.lista_opciones.count() == 0:
+            vacio = QLabel("Aún no hay opciones. Créalas en la pestaña «Opciones» de Servicios.")
+            vacio.setProperty("class", "ayuda")
+            vacio.setWordWrap(True)
+            capa.addWidget(vacio)
         return pagina
 
     def _pestana_productos(self) -> QWidget:
@@ -160,22 +183,6 @@ class ServicioDialog(QDialog):
         fila.addStretch()
         return fila
 
-    def _agregar_subservicio(self, sub_id: int | None = None, nombre: str = "", precio: float = 0.0) -> None:
-        fila = self.tabla_sub.rowCount()
-        self.tabla_sub.insertRow(fila)
-        campo = QLineEdit(nombre)
-        campo.setPlaceholderText("Ej. Fluorización")
-        campo.setProperty("sub_id", sub_id)
-        costo = QDoubleSpinBox()
-        costo.setMaximum(999999)
-        costo.setDecimals(2)
-        costo.setPrefix(f"{self.moneda} ")
-        costo.setValue(precio)
-        self.tabla_sub.setCellWidget(fila, 0, campo)
-        self.tabla_sub.setCellWidget(fila, 1, costo)
-        if sub_id is None:
-            campo.setFocus()
-
     def _agregar_producto(self, producto_id: int | None = None, cantidad: float = 1.0, cobrar: bool = False) -> None:
         if not self._productos_disponibles:
             QMessageBox.information(self, "Sin productos", "Primero crea productos en el menú Productos.")
@@ -202,11 +209,10 @@ class ServicioDialog(QDialog):
         self.tabla_prod.setCellWidget(fila, 2, contenedor)
 
     # ------------------------------------------------------ Guardar ----
-    def _leer_subservicios(self) -> list[dict]:
-        return [{"id": self.tabla_sub.cellWidget(f, 0).property("sub_id"),
-                 "nombre": self.tabla_sub.cellWidget(f, 0).text(),
-                 "precio": self.tabla_sub.cellWidget(f, 1).value()}
-                for f in range(self.tabla_sub.rowCount())]
+    def _leer_opciones(self) -> list[int]:
+        return [self.lista_opciones.item(i).data(Qt.UserRole)
+                for i in range(self.lista_opciones.count())
+                if self.lista_opciones.item(i).checkState() == Qt.Checked]
 
     def _leer_productos(self) -> list[dict]:
         return [{"producto_id": self.tabla_prod.cellWidget(f, 0).currentData(),
@@ -217,7 +223,7 @@ class ServicioDialog(QDialog):
     def _guardar(self) -> None:
         try:
             datos = (self.input_nombre.text(), self.input_precio.value(), self.input_duracion.value())
-            extras = dict(subservicios=self._leer_subservicios(), productos=self._leer_productos())
+            extras = dict(opcion_ids=self._leer_opciones(), productos=self._leer_productos())
             if self.servicio:
                 self.service.actualizar(self.servicio["id"], *datos, **extras)
             else:
@@ -226,6 +232,165 @@ class ServicioDialog(QDialog):
             QMessageBox.warning(self, "No se pudo guardar el servicio", str(e))
             return
         self.accept()
+
+
+class OpcionDialog(QDialog):
+    """Crea o edita una opción del catálogo: un efecto (se cobra aparte, varios a la vez) o un
+    tipo de servicio (otra modalidad que no es un efecto, se elige uno solo)."""
+
+    def __init__(self, service: ServicioService, opcion: dict | None = None,
+                 moneda: str = "S/", parent=None):
+        super().__init__(parent)
+        self.service = service
+        self.opcion = opcion
+        self.setWindowTitle("Editar opción" if opcion else "Nueva opción")
+        self.resize(440, 220)
+
+        raiz = QVBoxLayout(self)
+        formulario = QFormLayout()
+        self.input_nombre = QLineEdit()
+        self.input_nombre.setPlaceholderText("Ej. Ojo de gato")
+        formulario.addRow("Nombre:", self.input_nombre)
+
+        self.combo_clase = QComboBox()
+        self.combo_clase.addItem("Efecto (se pueden elegir varios)", CLASE_EFECTO)
+        self.combo_clase.addItem("Tipo de servicio (se elige uno)", CLASE_TIPO)
+        formulario.addRow("Clase:", self.combo_clase)
+
+        self.input_costo = QDoubleSpinBox()
+        self.input_costo.setMaximum(999999)
+        self.input_costo.setDecimals(2)
+        self.input_costo.setPrefix(f"{moneda} ")
+        self.input_costo.setToolTip("Se suma al precio base del servicio; nunca va incluido en él.")
+        formulario.addRow("Costo adicional:", self.input_costo)
+        raiz.addLayout(formulario)
+
+        if opcion:
+            self.input_nombre.setText(opcion["nombre"])
+            self.combo_clase.setCurrentIndex(max(0, self.combo_clase.findData(opcion["clase"])))
+            self.input_costo.setValue(opcion["precio"])
+
+        botones = QHBoxLayout()
+        botones.addStretch()
+        cancelar = QPushButton("Cancelar")
+        cancelar.setProperty("class", "secondary")
+        cancelar.clicked.connect(self.reject)
+        guardar = QPushButton("Guardar")
+        guardar.setProperty("class", "success")
+        guardar.clicked.connect(self._guardar)
+        botones.addWidget(cancelar)
+        botones.addWidget(guardar)
+        raiz.addLayout(botones)
+
+    def _guardar(self) -> None:
+        try:
+            self.service.guardar_opcion(
+                self.input_nombre.text(), self.input_costo.value(), self.combo_clase.currentData(),
+                self.opcion["id"] if self.opcion else None)
+        except ServicioError as e:
+            QMessageBox.warning(self, "No se pudo guardar la opción", str(e))
+            return
+        self.accept()
+
+
+class OpcionesPanel(QWidget):
+    """Catálogo de opciones (efectos y tipos de servicio), definidas una sola vez.
+    Cada servicio marca después cuáles le aplican."""
+
+    cambio = Signal()
+
+    def __init__(self, service: ServicioService, parent=None):
+        super().__init__(parent)
+        self.service = service
+        self.config_service = ConfiguracionService()
+        self._filas: list[dict] = []
+
+        raiz = QVBoxLayout(self)
+        raiz.setContentsMargins(0, ESPACIO_MD, 0, 0)
+        tarjeta = Card("Catálogo de opciones")
+
+        ayuda = QLabel("Crea aquí una sola vez los efectos (se cobran aparte, se pueden elegir varios) y "
+                       "los tipos de servicio (se elige uno). Luego, en cada servicio, solo marcas cuáles "
+                       "aplican. Nada viene incluido en el precio base.")
+        ayuda.setProperty("class", "ayuda")
+        ayuda.setWordWrap(True)
+        tarjeta.cuerpo.addWidget(ayuda)
+
+        barra = QHBoxLayout()
+        boton_nueva = QPushButton("+  Nueva opción")
+        boton_nueva.setProperty("class", "success")
+        boton_nueva.clicked.connect(self._nueva)
+        barra.addWidget(boton_nueva)
+        barra.addStretch()
+        tarjeta.cuerpo.addLayout(barra)
+
+        self.tabla = QTableWidget(0, 6)
+        self.tabla.setHorizontalHeaderLabels(["Opción", "Clase", "Costo adicional", "Se usa en", "Estado", ""])
+        encabezado = self.tabla.horizontalHeader()
+        encabezado.setSectionResizeMode(0, QHeaderView.Stretch)
+        for columna in (1, 2, 3):
+            encabezado.setSectionResizeMode(columna, QHeaderView.ResizeToContents)
+        configurar_tabla_erp(self.tabla, derecha=(2,), centro=(1, 3, 4), altura_fila=48)
+        encabezado.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.tabla.setColumnWidth(4, 110)
+        encabezado.setSectionResizeMode(5, QHeaderView.Fixed)
+        self.tabla.setColumnWidth(5, 230)
+        self.tabla.itemDoubleClicked.connect(lambda item: self._editar(self._filas[item.row()]))
+        tarjeta.cuerpo.addWidget(self.tabla, 1)
+
+        self.label_vacio = QLabel("Aún no hay opciones. Crea la primera con «Nueva opción».")
+        self.label_vacio.setProperty("class", "ayuda")
+        self.label_vacio.setAlignment(Qt.AlignCenter)
+        tarjeta.cuerpo.addWidget(self.label_vacio)
+        raiz.addWidget(tarjeta, 1)
+        self.actualizar()
+
+    def actualizar(self) -> None:
+        moneda = self.config_service.obtener().get("moneda", "S/")
+        self._filas = self.service.listar_opciones(solo_activas=False)
+        self.label_vacio.setVisible(not self._filas)
+        self.tabla.clearContents()
+        self.tabla.setRowCount(len(self._filas))
+        for i, opcion in enumerate(self._filas):
+            self.tabla.setItem(i, 0, QTableWidgetItem(opcion["nombre"]))
+            self.tabla.setItem(i, 1, item_centro(texto_clase(opcion["clase"])))
+            self.tabla.setItem(i, 2, item_derecha(formatear_moneda(opcion["precio"], moneda)))
+            usos = self.service.contar_servicios_de_opcion(opcion["id"])
+            self.tabla.setItem(i, 3, item_centro(f"{usos} servicio(s)" if usos else "—"))
+            estado = StatusBadge("Activa", "ok") if opcion["activo"] else StatusBadge("Inactiva", "neutral")
+            self.tabla.setCellWidget(i, 4, estado)
+
+            acciones = QWidget()
+            fila = QHBoxLayout(acciones)
+            fila.setContentsMargins(4, 4, 4, 4)
+            fila.setSpacing(6)
+            for texto, funcion in (
+                ("Editar", lambda _, o=opcion: self._editar(o)),
+                ("Desactivar" if opcion["activo"] else "Activar", lambda _, o=opcion: self._alternar(o)),
+            ):
+                boton = QPushButton(texto)
+                boton.setProperty("class", "secondary")
+                compactar_boton(boton)
+                boton.clicked.connect(funcion)
+                fila.addWidget(boton)
+            self.tabla.setCellWidget(i, 5, acciones)
+
+    def _nueva(self) -> None:
+        moneda = self.config_service.obtener().get("moneda", "S/")
+        if OpcionDialog(self.service, None, moneda, self).exec() == QDialog.Accepted:
+            self.actualizar()
+            self.cambio.emit()
+
+    def _editar(self, opcion: dict) -> None:
+        moneda = self.config_service.obtener().get("moneda", "S/")
+        if OpcionDialog(self.service, opcion, moneda, self).exec() == QDialog.Accepted:
+            self.actualizar()
+            self.cambio.emit()
+
+    def _alternar(self, opcion: dict) -> None:
+        self.service.cambiar_activo_opcion(opcion["id"], not opcion["activo"])
+        self.actualizar()
+        self.cambio.emit()
 
 
 class ServiciosPage(QWidget):
@@ -245,15 +410,28 @@ class ServiciosPage(QWidget):
         raiz.setSpacing(ESPACIO_MD)
 
         cabecera = PageHeader("Servicios", "Lo que ofreces a tus clientes; se eligen al hacer una reserva")
-        boton_nuevo = QPushButton("+  Nuevo servicio")
-        boton_nuevo.setProperty("class", "success")
-        boton_nuevo.clicked.connect(self._nuevo)
-        cabecera.agregar_accion(boton_nuevo)
+        self.boton_nuevo = QPushButton("+  Nuevo servicio")
+        self.boton_nuevo.setProperty("class", "success")
+        self.boton_nuevo.clicked.connect(self._nuevo)
+        cabecera.agregar_accion(self.boton_nuevo)
         raiz.addWidget(cabecera)
+
+        self.pestanas = QTabWidget()
+        self.pestanas.addTab(self._pestana_servicios(), "Servicios")
+        self.panel_opciones = OpcionesPanel(self.service)
+        self.panel_opciones.cambio.connect(self.actualizar)
+        self.pestanas.addTab(self.panel_opciones, "Opciones")
+        self.pestanas.currentChanged.connect(lambda i: self.boton_nuevo.setVisible(i == 0))
+        raiz.addWidget(self.pestanas, 1)
+
+    def _pestana_servicios(self) -> QWidget:
+        pagina = QWidget()
+        capa = QVBoxLayout(pagina)
+        capa.setContentsMargins(0, ESPACIO_MD, 0, 0)
 
         tarjeta = Card("Mis servicios")
         self.tabla = QTableWidget(0, 6)
-        self.tabla.setHorizontalHeaderLabels(["Servicio", "Incluye", "Duración", "Precio base", "Estado", ""])
+        self.tabla.setHorizontalHeaderLabels(["Servicio", "Opciones", "Duración", "Precio base", "Estado", ""])
         encabezado = self.tabla.horizontalHeader()
         encabezado.setSectionResizeMode(0, QHeaderView.Stretch)
         for columna in (1, 2, 3):
@@ -270,7 +448,8 @@ class ServiciosPage(QWidget):
         self.label_vacio.setProperty("class", "ayuda")
         self.label_vacio.setAlignment(Qt.AlignCenter)
         tarjeta.cuerpo.addWidget(self.label_vacio)
-        raiz.addWidget(tarjeta, 1)
+        capa.addWidget(tarjeta, 1)
+        return pagina
 
     def actualizar(self) -> None:
         moneda = self.config_service.obtener().get("moneda", "S/")
@@ -280,11 +459,15 @@ class ServiciosPage(QWidget):
         self.tabla.setRowCount(len(self._filas))
         for i, servicio in enumerate(self._filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(servicio["nombre"]))
-            n_sub = len(self.service.listar_subservicios(servicio["id"]))
+            subs = self.service.listar_subservicios(servicio["id"])
+            n_efectos = sum(1 for s in subs if s.get("clase") != CLASE_TIPO)
+            n_tipos = sum(1 for s in subs if s.get("clase") == CLASE_TIPO)
             n_prod = len(self.service.listar_productos(servicio["id"]))
-            incluye = " · ".join(x for x in (
-                f"{n_sub} sub-servicio(s)" if n_sub else "", f"{n_prod} producto(s)" if n_prod else "") if x)
-            self.tabla.setItem(i, 1, QTableWidgetItem(incluye or "—"))
+            opciones = " · ".join(x for x in (
+                f"{n_efectos} efecto(s)" if n_efectos else "",
+                f"{n_tipos} tipo(s) de servicio" if n_tipos else "",
+                f"{n_prod} producto(s)" if n_prod else "") if x)
+            self.tabla.setItem(i, 1, QTableWidgetItem(opciones or "—"))
             self.tabla.setItem(i, 2, item_centro(texto_duracion(servicio["duracion_min"])))
             self.tabla.setItem(i, 3, item_derecha(formatear_moneda(servicio["precio"], moneda)))
             estado = StatusBadge("Activo", "ok") if servicio["activo"] else StatusBadge("Inactivo", "neutral")
@@ -322,3 +505,4 @@ class ServiciosPage(QWidget):
     def showEvent(self, evento) -> None:
         super().showEvent(evento)
         self.actualizar()
+        self.panel_opciones.actualizar()
