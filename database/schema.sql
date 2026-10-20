@@ -181,6 +181,7 @@ CREATE TABLE IF NOT EXISTS compra_detalle (
     presentacion_nombre TEXT NOT NULL DEFAULT 'Unidad',
     cantidad_presentacion REAL NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_compras_fecha ON compras(fecha);
 CREATE INDEX IF NOT EXISTS idx_compra_detalle_compra ON compra_detalle(compra_id);
 CREATE INDEX IF NOT EXISTS idx_compra_detalle_producto ON compra_detalle(producto_id);
 -- ------------------------------------------------------------
@@ -232,6 +233,8 @@ CREATE TABLE IF NOT EXISTS ventas (
 );
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
 CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas(cliente_id);
+-- Para los reportes por cliente dentro de la ventana de 15 días, aunque el historial sea enorme
+CREATE INDEX IF NOT EXISTS idx_ventas_cliente_fecha ON ventas(cliente_id, fecha);
 -- ------------------------------------------------------------
 -- VENTA_DETALLE (líneas) -- costo_unitario_snapshot es CLAVE:
 -- congela el costo al momento de la venta para que la utilidad
@@ -286,6 +289,8 @@ CREATE TABLE IF NOT EXISTS inventario_movimientos (
 );
 CREATE INDEX IF NOT EXISTS idx_inv_mov_producto ON inventario_movimientos(producto_id);
 CREATE INDEX IF NOT EXISTS idx_inv_mov_referencia ON inventario_movimientos(referencia_tipo, referencia_id);
+-- Las pantallas de inventario solo piden los últimos días: sin este índice recorrían toda la tabla
+CREATE INDEX IF NOT EXISTS idx_inv_mov_fecha ON inventario_movimientos(fecha);
 -- ------------------------------------------------------------
 -- CAJA_MOVIMIENTOS
 -- ------------------------------------------------------------

@@ -45,8 +45,14 @@ APP_LOGO_PATH = ICONS_DIR / "logo_completo.png"
 APP_LOGO_SIDEBAR_PATH = ICONS_DIR / "logo_sidebar.png"
 
 # Constantes de negocio
-# Días de historial que se conservan (ventas, movimientos de inventario, etc.).
-# Lo más antiguo se elimina solo al abrir la app. Cambiar aquí cambia todo.
+# Días de historial que muestran las pantallas (ventas, movimientos de inventario, reportes, etc.).
+# Cambiar aquí cambia todo. Si BORRAR_HISTORIAL_ANTIGUO es True, lo más antiguo además se
+# elimina solo al abrir la app; con False (por defecto) el historial completo se conserva.
 DIAS_RETENCION = 15
+BORRAR_HISTORIAL_ANTIGUO = False
+"""Con False (lo normal) las pantallas muestran solo los últimos DIAS_RETENCION días pero
+NADA se borra: el historial completo queda guardado en la base de datos. Con True se vuelve
+al comportamiento anterior: al abrir la app se borran (con backup previo) las ventas y los
+movimientos de inventario más antiguos que DIAS_RETENCION días."""
 STOCK_BAJO_DEFAULT_MINIMO = 5
 RECOVERY_CODE_LENGTH_BYTES = 8  # genera código de 16 caracteres hex

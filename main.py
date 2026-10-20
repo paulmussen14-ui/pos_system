@@ -10,10 +10,11 @@ Flujo:
 """
 
 import sys
+import time
 
-from PySide6.QtWidgets import QApplication, QSplashScreen
+from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation
+from PySide6.QtCore import Qt, QThread, QTimer, QPropertyAnimation
 
 from database.connection import get_db  # inicializa la BD y aplica el esquema
 from services.auth_service import AuthService
@@ -28,11 +29,33 @@ from utils.retencion import ejecutar_retencion_diaria
 from config import APP_ICON_PATH, APP_LOGO_PATH
 
 
+_ultimo_aviso_error = 0.0
+
+
 def _excepthook(tipo, valor, tb) -> None:
     """Registra en el log cualquier excepción no controlada (por ejemplo,
-    dentro de un slot de Qt). Sin esto, en el .exe sin consola el error se
-    pierde en silencio."""
+    dentro de un slot de Qt) y avisa al usuario. Sin esto, en el .exe sin
+    consola el error se pierde en silencio y el botón "no hace nada"."""
+    global _ultimo_aviso_error
     logger.critical("Error no controlado", exc_info=(tipo, valor, tb))
+    try:
+        app = QApplication.instance()
+        # Solo desde el hilo de la interfaz, y como máximo un aviso cada 5 segundos.
+        if app is None or QThread.currentThread() is not app.thread():
+            return
+        ahora = time.monotonic()
+        if ahora - _ultimo_aviso_error < 5:
+            return
+        _ultimo_aviso_error = ahora
+        QMessageBox.critical(
+            None, "Ocurrió un error inesperado",
+            "No se pudo completar la operación.\n\n"
+            "Si estabas guardando algo (una venta, una reserva, un cobro), revisa que se haya "
+            "registrado antes de repetirlo. Si el problema continúa, envía el archivo de "
+            "registro (log) a soporte.\n\n"
+            f"Detalle: {tipo.__name__}: {valor}")
+    except Exception:
+        pass  # el aviso nunca debe causar otro error
 
 
 sys.excepthook = _excepthook

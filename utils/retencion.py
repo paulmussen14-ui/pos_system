@@ -1,4 +1,5 @@
-"""Retención de registros: conserva solo los últimos DIAS_RETENCION días
+"""Retención de registros (solo si config.BORRAR_HISTORIAL_ANTIGUO es True; por defecto
+está apagada y no se borra nada). Conserva solo los últimos DIAS_RETENCION días
 (15 por defecto, ver config.py), contando el día de hoy.
 
 Borra de forma DEFINITIVA, en este orden (por las llaves foráneas):
@@ -17,7 +18,7 @@ caja_movimientos, compras, historial_costos ni historial_precios.
 import sqlite3
 from datetime import date
 
-from config import APP_DATA_DIR, BACKUPS_DIR, DIAS_RETENCION
+from config import APP_DATA_DIR, BACKUPS_DIR, BORRAR_HISTORIAL_ANTIGUO, DIAS_RETENCION
 from utils.logger import logger
 
 _MARCA_ULTIMA_EJECUCION = APP_DATA_DIR / "retencion_ultima.txt"
@@ -85,7 +86,13 @@ def ejecutar_retencion_diaria() -> dict | None:
     se conservan los 7 últimos) y recién entonces elimina. Nunca lanza
     excepciones hacia afuera: un fallo aquí no debe impedir abrir la app.
     Devuelve el detalle de lo borrado, o None si no hizo nada.
+
+    Solo actúa si config.BORRAR_HISTORIAL_ANTIGUO es True. Con False (valor por defecto)
+    no borra nada: las pantallas siguen mostrando solo la ventana de DIAS_RETENCION días,
+    pero el historial completo se conserva.
     """
+    if not BORRAR_HISTORIAL_ANTIGUO:
+        return None
     try:
         hoy = date.today().isoformat()
         if _MARCA_ULTIMA_EJECUCION.exists() and _MARCA_ULTIMA_EJECUCION.read_text().strip() == hoy:

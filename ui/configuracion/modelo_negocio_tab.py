@@ -18,6 +18,7 @@ from services.configuracion_service import (
     ConfiguracionService, ConfiguracionError, MODELO_VENTAS, MODELO_SERVICIOS,
     INTERVALOS_AGENDA_MIN,
 )
+from services.reserva_service import ReservaService
 from ui.tokens import ESPACIO_SM, ESPACIO_MD
 from ui.widgets.card import Card
 from utils.fechas import DIAS_SEMANA, a_hhmm
@@ -152,6 +153,23 @@ class ModeloNegocioTab(QWidget):
     def _guardar(self) -> None:
         modelo = self._modelo_elegido()
         dias = [i for i, check in enumerate(self.checks_dias) if check.isChecked()]
+        if modelo == MODELO_VENTAS and self.config_service.obtener_modelo_negocio() == MODELO_SERVICIOS:
+            # Al pasar a Ventas la Agenda se oculta: las reservas pendientes y sus adelantos
+            # quedarían sin poder cobrarse ni cancelarse hasta volver a Servicios con reserva.
+            pendientes = ReservaService().resumen_pendientes()
+            if pendientes["cantidad"]:
+                moneda = self.config_service.obtener().get("moneda", "S/")
+                detalle = (f" y {moneda} {pendientes['adelantos']:.2f} recibidos en adelantos"
+                           if pendientes["adelantos"] else "")
+                respuesta = QMessageBox.question(
+                    self, "Tienes reservas pendientes",
+                    f"Hay {pendientes['cantidad']} reserva(s) por atender{detalle}.\n\n"
+                    "Si cambias a «Ventas de productos», la Agenda se oculta y no podrás cobrarlas, "
+                    "cancelarlas ni devolver adelantos hasta volver a «Servicios con reserva». "
+                    "No se borra nada.\n\n¿Cambiar de modelo de todos modos?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if respuesta != QMessageBox.Yes:
+                    return
         try:
             self.config_service.actualizar_modelo_negocio(
                 modelo,

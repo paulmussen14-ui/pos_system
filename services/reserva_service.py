@@ -544,6 +544,17 @@ class ReservaService:
                VALUES (?, 'servicio', ?, 0, 0, 0, 0)""", (item["nombre"], item["precio_unitario"]))
         return cur.lastrowid
 
+    def resumen_pendientes(self) -> dict:
+        """Reservas todavía por atender (estado 'reservada') y el dinero de adelantos que
+        el negocio tiene recibido por ellas. Se usa para avisar antes de cambiar de modelo."""
+        fila = self.db.get_connection().execute(
+            """SELECT COUNT(*) AS cantidad,
+                      COALESCE((SELECT SUM(p.monto) FROM reserva_pagos p
+                                JOIN reservas r2 ON r2.id = p.reserva_id
+                                WHERE r2.estado = ? AND p.estado = 'vigente'), 0) AS adelantos
+               FROM reservas WHERE estado = ?""", (ESTADO_RESERVADA, ESTADO_RESERVADA)).fetchone()
+        return {"cantidad": int(fila["cantidad"]), "adelantos": round(float(fila["adelantos"]), 2)}
+
     # ------------------------------------------------------ Boleta ----
     def registrar_envio(self, reserva_id: int, correo: str) -> None:
         with self.db.transaction() as cur:
