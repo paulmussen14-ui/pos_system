@@ -34,7 +34,7 @@ from config import STYLES_DIR, APP_ICON_PATH, APP_VERSION
 # del menú arriba (sirve para logos anchos tipo banner y para logos cuadrados),
 # con un margen interno para que no toque el borde de la tarjeta blanca.
 ANCHO_LOGO = ANCHO_SIDEBAR - 2 * ESPACIO_MD
-ALTO_LOGO = 76
+ALTO_LOGO = 104
 MARGEN_LOGO = 8
 # Si el negocio no tiene logo: cuadro con la inicial del nombre.
 TAMANO_INICIAL = 48
@@ -69,9 +69,9 @@ MENU_GRUPOS = [
 ]
 
 # Qué se ve en el menú según el modelo de negocio (Configuración → Modelo de negocio).
-# Lo que no está en ninguna lista se ve siempre (Inicio, Caja, Clientes, RRHH, Reportes, Configuración).
+# Lo que no está en ninguna lista se ve siempre (Inicio, Caja, Clientes, RRHH, Cupones, Reportes, Configuración).
 # Productos, Compras e Inventario se quedan: los servicios pueden usar productos (descuentan stock).
-PAGINAS_SOLO_VENTAS = {"Ventas", "Proformas", "Cupones"}
+PAGINAS_SOLO_VENTAS = {"Ventas", "Proformas"}
 PAGINAS_SOLO_SERVICIOS = {"Servicios", "Agenda"}
 
 
@@ -228,6 +228,7 @@ class MainWindow(QMainWindow):
         self.label_negocio = QLabel(NOMBRE_NEGOCIO_POR_DEFECTO)
         self.label_negocio.setObjectName("sidebarTitle")
         self.label_negocio.setWordWrap(True)
+        self.label_negocio.setAlignment(Qt.AlignCenter)
         bloque_texto.addWidget(self.label_negocio)
 
         fila_identidad.addLayout(bloque_texto, stretch=1)

@@ -442,8 +442,8 @@ QWidget#sidebarHeader {
 }
 
 QFrame#logoCard {
-    background-color: #ffffff;
-    border: none;
+    background-color: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.22);
     border-radius: {{r_md}}px;
 }
 
@@ -460,6 +460,7 @@ QLabel#sidebarTitle {
     font-size: {{t_subtitulo}}px;
     font-weight: 700;
     padding: 0px;
+    qproperty-alignment: AlignCenter;
 }
 
 QLabel#sidebarUser {

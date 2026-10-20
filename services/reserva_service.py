@@ -12,6 +12,9 @@ Una reserva ocupa un tramo de un día (hora_inicio → hora_fin) y pasa por esto
     no_asistio → el cliente no llegó (sigue ocupando el tramo hasta que se cancele).
     cancelada  → libera el tramo; deja de mostrarse en la agenda.
 
+Al marcar la reserva como atendida se pueden registrar los insumos y productos que se usaron
+(en unidad base, gramos, paquetes...): descuentan stock y, los que se cobran, suman a la boleta.
+
 Al cobrar se registra una venta normal (con el producto oculto del servicio) para que
 el ingreso aparezca en Caja y Reportes, pero la reserva guarda su PROPIA copia de los
 datos de la boleta (número, total, método de pago): la limpieza de registros antiguos
@@ -400,11 +403,102 @@ class ReservaService:
         with self.db.transaction() as cur:
             cur.execute("UPDATE reservas SET estado = ? WHERE id = ?", (estado, reserva_id))
 
+    # ---------------------------------------------- Insumos al atender ----
+    def items_de_consumo(self, consumos) -> list[dict]:
+        """Convierte lo que el negocio usó al atender en ítems de la reserva (tipo 'insumo').
+
+        Cada consumo es {producto_id, cantidad, presentacion_id (None = unidad base), cobrar}.
+        `cantidad` está en la medida elegida (2 paquetes, 15 gramos...). El nombre, el precio
+        y la equivalencia en unidades base se leen AQUÍ desde la base de datos, no de la
+        pantalla. Si `cobrar` es falso el ítem solo descuenta stock (precio 0).
+        Valida que el producto exista y que alcance el stock (sumando todo lo que se use del
+        mismo producto, incluidos los productos que ya traía la reserva)."""
+        conexion = self.db.get_connection()
+        items: list[dict] = []
+        for c in consumos or []:
+            try:
+                cantidad = round(float(c.get("cantidad") or 0), 4)
+            except (TypeError, ValueError):
+                cantidad = 0
+            producto = conexion.execute(
+                "SELECT id, nombre, unidad_medida, precio_venta_actual, activo FROM productos WHERE id = ?",
+                (c.get("producto_id"),)).fetchone()
+            if not producto or not producto["activo"]:
+                raise ReservaError("Uno de los productos elegidos ya no está disponible.")
+            if cantidad <= 0:
+                raise ReservaError(f"La cantidad de «{producto['nombre']}» debe ser mayor a cero.")
+
+            presentacion_id = c.get("presentacion_id")
+            if presentacion_id:
+                pres = conexion.execute(
+                    "SELECT nombre, cantidad_unidades, precio FROM producto_presentaciones "
+                    "WHERE id = ? AND producto_id = ? AND activo = 1",
+                    (presentacion_id, producto["id"])).fetchone()
+                if not pres:
+                    raise ReservaError(f"La presentación elegida de «{producto['nombre']}» ya no existe.")
+                medida, factor, precio = pres["nombre"], float(pres["cantidad_unidades"]), float(pres["precio"])
+                if factor <= 0:
+                    raise ReservaError(f"La presentación «{medida}» de «{producto['nombre']}» no es válida.")
+            else:
+                medida = (producto["unidad_medida"] or "unidad").strip() or "unidad"
+                factor, precio = 1.0, float(producto["precio_venta_actual"])
+
+            precio = round(precio, 4) if c.get("cobrar") else 0.0
+            items.append({
+                "tipo": "insumo", "referencia_id": producto["id"],
+                "nombre": f"{producto['nombre']} ({medida})", "cantidad": cantidad,
+                "precio_unitario": precio, "subtotal": round(precio * cantidad, 2),
+                "presentacion_nombre": medida, "factor_unidades": factor,
+            })
+        return items
+
+    def _validar_stock_items(self, items: list[dict]) -> None:
+        """Comprueba que el stock alcance para TODOS los ítems que descuentan (productos del
+        servicio e insumos), sumando por producto. Se llama antes de tocar nada."""
+        conexion = self.db.get_connection()
+        necesario: dict[int, float] = {}
+        for item in items:
+            if item["tipo"] in ("producto", "insumo"):
+                base = item["cantidad"] * float(item.get("factor_unidades") or 1)
+                necesario[item["referencia_id"]] = necesario.get(item["referencia_id"], 0.0) + base
+        for producto_id, base in necesario.items():
+            producto = conexion.execute(
+                "SELECT nombre, unidad_medida, stock_actual FROM productos WHERE id = ?",
+                (producto_id,)).fetchone()
+            nombre = next((i["nombre"] for i in items if i["referencia_id"] == producto_id), "producto")
+            if not producto:
+                raise ReservaError(f"El producto «{nombre}» ya no existe.")
+            if producto["stock_actual"] + 1e-9 < base:
+                unidad = (producto["unidad_medida"] or "").strip()
+                raise ReservaError(
+                    f"Stock insuficiente de «{producto['nombre']}» (disponible: "
+                    f"{producto['stock_actual']:g} {unidad}, necesario: {base:g} {unidad}). "
+                    "Repón stock en Productos/Compras o quita el producto de la lista.")
+
+    @staticmethod
+    def _agregar_items(cur, reserva_id: int, items: list[dict]) -> None:
+        """Añade ítems a la reserva sin tocar los que ya tiene (los insumos se registran al atender)."""
+        for i in items:
+            cur.execute(
+                """INSERT INTO reserva_items (reserva_id, tipo, referencia_id, nombre, cantidad,
+                                              precio_unitario, subtotal, presentacion_nombre,
+                                              factor_unidades)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (reserva_id, i["tipo"], i["referencia_id"], i["nombre"], i["cantidad"],
+                 i["precio_unitario"], i["subtotal"], i.get("presentacion_nombre"),
+                 float(i.get("factor_unidades") or 1)),
+            )
+
     # ------------------------------------------------------- Cobro ----
     def cobrar(self, reserva_id: int, usuario_id: int, metodo_pago_id: int | None,
-               descuento: float = 0.0, monto_recibido: float | None = None) -> dict:
+               descuento: float = 0.0, monto_recibido: float | None = None,
+               consumos: list[dict] | None = None) -> dict:
         """Cobra la reserva: registra la venta (con el servicio, sus sub-servicios y productos),
         descuenta el stock de los productos, y le asigna el número de boleta.
+
+        consumos: insumos y productos usados al atender (ver items_de_consumo). Se guardan en
+        la reserva, descuentan stock y los cobrados se suman al total y a la boleta; todo en
+        la misma transacción que el cobro (si algo falla no se guarda nada).
 
         Solo se paga el SALDO: total - adelantos vigentes. Ese saldo es lo que entra a la caja
         si el método es efectivo (los adelantos en efectivo ya entraron cuando se recibieron).
@@ -419,7 +513,8 @@ class ReservaService:
         if reserva["estado"] == ESTADO_CANCELADA:
             raise ReservaError("No se puede cobrar una reserva cancelada.")
 
-        subtotal = reserva["total_estimado"]
+        extras = self.items_de_consumo(consumos)
+        subtotal = round(reserva["total_estimado"] + sum(i["subtotal"] for i in extras), 2)
         descuento = round(float(descuento or 0), 2)
         if descuento < 0:
             raise ReservaError("El descuento no puede ser negativo.")
@@ -459,19 +554,9 @@ class ReservaService:
                     f"El monto recibido ({monto_recibido:.2f}) no alcanza para el saldo ({saldo:.2f}).")
             pago_recibido, pago_cambio = monto_recibido, round(monto_recibido - saldo, 2)
 
-        # Stock de los productos del servicio (antes de tocar nada).
-        for item in reserva["items"]:
-            if item["tipo"] != "producto":
-                continue
-            producto = conexion.execute(
-                "SELECT nombre, stock_actual FROM productos WHERE id = ?", (item["referencia_id"],)).fetchone()
-            if not producto:
-                raise ReservaError(f"El producto «{item['nombre']}» ya no existe.")
-            if producto["stock_actual"] < item["cantidad"]:
-                raise ReservaError(
-                    f"Stock insuficiente de «{producto['nombre']}» (disponible: "
-                    f"{producto['stock_actual']:g}, necesario: {item['cantidad']:g}). "
-                    "Repón stock en Productos/Compras o quita el producto de la reserva.")
+        # Stock de los productos del servicio y de los insumos (antes de tocar nada).
+        items_cobro = reserva["items"] + extras
+        self._validar_stock_items(items_cobro)
 
         # Si el cliente se borró después de reservar, la venta queda con su nombre escrito.
         cliente_id = reserva["cliente_id"]
@@ -487,8 +572,10 @@ class ReservaService:
             # Servicio base
             self._linea_servicio(cur, venta_id, self._producto_del_servicio(cur, reserva),
                                  reserva["precio"])
-            # Sub-servicios y productos
-            for item in reserva["items"]:
+            # Insumos usados al atender: quedan guardados en la reserva (para la boleta)
+            self._agregar_items(cur, reserva_id, extras)
+            # Sub-servicios, productos e insumos
+            for item in items_cobro:
                 if item["tipo"] == "subservicio":
                     self._linea_servicio(cur, venta_id, self._producto_del_subservicio(cur, item),
                                          item["subtotal"])
@@ -520,19 +607,26 @@ class ReservaService:
             presentacion_nombre="Servicio", cantidad_presentacion=1, factor_unidades=1)
 
     def _linea_producto(self, cur, venta_id: int, item: dict, usuario_id: int) -> None:
-        """Línea de un producto real: congela su costo, descuenta stock y deja el movimiento."""
+        """Línea de un producto real: congela su costo, descuenta stock y deja el movimiento.
+        En los insumos la cantidad viene en la medida elegida (paquetes, gramos...): el stock
+        y el movimiento van en unidades base (cantidad x factor_unidades)."""
+        factor = float(item.get("factor_unidades") or 1)
+        base = round(item["cantidad"] * factor, 4)
         cur.execute("SELECT stock_actual, costo_promedio_actual FROM productos WHERE id = ?",
                     (item["referencia_id"],))
         fila = cur.fetchone()
-        if fila["stock_actual"] < item["cantidad"]:
+        if fila["stock_actual"] + 1e-9 < base:
             raise ReservaError(f"Stock insuficiente de «{item['nombre']}».")
         self.venta_repo.crear_linea_detalle(
-            cur, venta_id, item["referencia_id"], item["cantidad"], item["precio_unitario"],
-            fila["costo_promedio_actual"], item["subtotal"])
+            cur, venta_id, item["referencia_id"], base, item["precio_unitario"] / factor,
+            fila["costo_promedio_actual"], item["subtotal"],
+            presentacion_nombre=item.get("presentacion_nombre") or None,
+            cantidad_presentacion=item["cantidad"] if factor != 1 else None,
+            factor_unidades=factor if factor != 1 else None)
         cur.execute("UPDATE productos SET stock_actual = ? WHERE id = ?",
-                    (fila["stock_actual"] - item["cantidad"], item["referencia_id"]))
+                    (round(fila["stock_actual"] - base, 4), item["referencia_id"]))
         self.inventario_repo.registrar_movimiento(
-            cur, item["referencia_id"], "salida", item["cantidad"], "venta", venta_id, usuario_id)
+            cur, item["referencia_id"], "salida", base, "venta", venta_id, usuario_id)
 
     def _producto_del_servicio(self, cur, reserva: dict) -> int:
         """Producto oculto que representa el servicio de la reserva. Si el servicio ya no

@@ -3,12 +3,13 @@ mostrar su boleta (vista previa, PDF, correo, impresión)."""
 
 from datetime import date
 
-from PySide6.QtCore import Qt, QDate, QThreadPool
+from PySide6.QtCore import Qt, QDate, QThreadPool, QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QCheckBox, QMessageBox,
     QFileDialog, QInputDialog, QScrollArea, QFrame, QWidget, QListWidget, QListWidgetItem,
-    QTableWidget, QTableWidgetItem, QHeaderView,
+    QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QButtonGroup,
 )
 from shiboken6 import isValid
 
@@ -23,11 +24,15 @@ from services.configuracion_service import ConfiguracionService
 from services.reserva_service import (
     ReservaService, ReservaError, ESTADO_RESERVADA, ESTADO_ATENDIDA, ESTADO_NO_ASISTIO,
 )
+from services.producto_service import ProductoService
 from services.servicio_service import ServicioService, CLASE_TIPO
+from ui.compras.compra_form_dialog import _RuedaHorizontal, _LOCALE_PUNTO
+from ui.iconos import icono
 from ui.tokens import ESPACIO_SM, ESPACIO_MD
 from ui.widgets.card import Card
 from ui.widgets.status_badge import StatusBadge
-from ui.widgets.tabla_erp import configurar_tabla_erp, item_derecha
+from ui.widgets.tabla_erp import configurar_tabla_erp, item_derecha, compactar_boton, colorear_stock
+from utils.tablas import carga_rapida, cerca_del_final
 from ui.widgets.ticket_preview_dialog import TicketPreviewDialog
 from utils.logger import logger
 from utils.fechas import DIAS_CORTOS, a_hhmm, a_minutos, fecha_dmy, fecha_larga, parsear_fecha
@@ -599,11 +604,372 @@ class ReservaDialog(QDialog):
 # ====================================================================
 # Cobrar
 # ====================================================================
+class InsumosDialog(QDialog):
+    """Primer paso de «Marcar como atendida»: qué productos o insumos se usaron en la atención.
+
+    Igual que en Compras: a la izquierda toda la lista de productos con buscador y categorías
+    (un clic agrega el producto); a la derecha, lo usado en esta atención. Cada línea elige la
+    medida (unidad base —gramos, unidad...— o una presentación, como un paquete) y la cantidad.
+    Todo descuenta stock del inventario; lo que se marca «Cobrar» además se suma al total y a
+    la boleta. El resultado queda en `self.consumos` (lista que entiende ReservaService.cobrar);
+    puede quedar vacía."""
+
+    COL_PRODUCTO, COL_MEDIDA, COL_CANTIDAD, COL_COBRAR, COL_IMPORTE, COL_QUITAR = range(6)
+    TAMANO_PAGINA = 100
+
+    def __init__(self, reserva: dict, parent=None):
+        super().__init__(parent)
+        self.reserva = reserva
+        self.consumos: list[dict] = []
+        self.producto_service = ProductoService()
+        config = ConfiguracionService().obtener()
+        self.moneda = config.get("moneda", "S/")
+        self._tema = config.get("tema", "claro")
+        self._lineas: list[dict] = []   # una por fila de la tabla de la derecha, en el mismo orden
+        self._categoria_filtro = None
+        self._hay_mas_productos = False
+        self._productos_cargados = 0
+        # Lo que el servicio ya descuenta solo (productos del servicio): cuenta para el stock.
+        self._ya_incluidos: dict[int, float] = {}
+        for item in reserva.get("items", []):
+            if item["tipo"] == "producto":
+                self._ya_incluidos[item["referencia_id"]] = (
+                    self._ya_incluidos.get(item["referencia_id"], 0.0) + item["cantidad"])
+
+        self._timer_busqueda = QTimer(self)
+        self._timer_busqueda.setSingleShot(True)
+        self._timer_busqueda.setInterval(250)
+        self._timer_busqueda.timeout.connect(self._buscar_productos)
+
+        self._construir_ui()
+        self._cargar_categorias()
+        self._buscar_productos()
+        self._refrescar()
+        self.input_busqueda.setFocus()
+
+    # ------------------------------------------------------ Interfaz ----
+    def _construir_ui(self) -> None:
+        self.setWindowTitle("Insumos y productos usados")
+        # Grande por defecto, pero sin pasarse de la pantalla (laptops de 1366x768).
+        pantalla = QGuiApplication.primaryScreen().availableGeometry()
+        self.resize(min(1100, int(pantalla.width() * 0.92)), min(680, int(pantalla.height() * 0.88)))
+        self.setMinimumSize(min(860, pantalla.width()), min(500, pantalla.height()))
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        self.setSizeGripEnabled(True)
+
+        raiz = QVBoxLayout(self)
+        raiz.setSpacing(ESPACIO_SM)
+
+        encabezado = QLabel(f"<b>{self.reserva['cliente_nombre']}</b> · {self.reserva['servicio_nombre']}")
+        encabezado.setStyleSheet("font-size: 15px;")
+        raiz.addWidget(encabezado)
+        ayuda = QLabel("¿Qué usaste en esta atención? Se descuenta del inventario. Marca «Cobrar» solo "
+                       "en lo que le vendes al cliente: eso se suma a la boleta final.")
+        ayuda.setProperty("class", "ayuda")
+        ayuda.setWordWrap(True)
+        raiz.addWidget(ayuda)
+
+        divisor = QSplitter(Qt.Horizontal)
+        divisor.setChildrenCollapsible(False)
+        divisor.addWidget(self._construir_panel_productos())
+        divisor.addWidget(self._construir_panel_usado())
+        divisor.setStretchFactor(0, 5)
+        divisor.setStretchFactor(1, 6)
+        divisor.setSizes([440, 640])
+        raiz.addWidget(divisor, 1)
+
+        botones = QHBoxLayout()
+        botones.addStretch()
+        cancelar = QPushButton("Cancelar")
+        cancelar.setProperty("class", "secondary")
+        cancelar.clicked.connect(self.reject)
+        self.btn_continuar = QPushButton("Continuar")
+        self.btn_continuar.setProperty("class", "success")
+        self.btn_continuar.clicked.connect(self._continuar)
+        botones.addWidget(cancelar)
+        botones.addWidget(self.btn_continuar)
+        raiz.addLayout(botones)
+
+    def _construir_panel_productos(self) -> QWidget:
+        tarjeta = Card("Productos e insumos")
+        self.input_busqueda = QLineEdit()
+        self.input_busqueda.setPlaceholderText("Buscar producto por nombre...")
+        self.input_busqueda.setClearButtonEnabled(True)
+        self.input_busqueda.textChanged.connect(lambda: self._timer_busqueda.start())
+        self.input_busqueda.returnPressed.connect(self._enter_en_busqueda)
+        tarjeta.cuerpo.addWidget(self.input_busqueda)
+
+        # Categorías como botones (igual que en Compras y Ventas); se desplazan si no caben.
+        self.scroll_categorias = QScrollArea()
+        self.scroll_categorias.setObjectName("chipsScroll")
+        self.scroll_categorias.setWidgetResizable(True)
+        self.scroll_categorias.setFrameShape(QFrame.NoFrame)
+        self.scroll_categorias.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_categorias.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_categorias.setFixedHeight(40)
+        self._rueda_categorias = _RuedaHorizontal(self.scroll_categorias)
+        contenido_chips = QWidget()
+        contenido_chips.setObjectName("chipsContenido")
+        self.fila_categorias = QHBoxLayout(contenido_chips)
+        self.fila_categorias.setContentsMargins(0, 2, 0, 2)
+        self.fila_categorias.setSpacing(ESPACIO_SM)
+        self.fila_categorias.addStretch()
+        self.scroll_categorias.setWidget(contenido_chips)
+        self.grupo_categorias = QButtonGroup(self)
+        self.grupo_categorias.setExclusive(True)
+        tarjeta.cuerpo.addWidget(self.scroll_categorias)
+
+        self.tabla_productos = QTableWidget(0, 3)
+        self.tabla_productos.setHorizontalHeaderLabels(["Categoría", "Producto", "Stock"])
+        cab = self.tabla_productos.horizontalHeader()
+        cab.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.tabla_productos.setColumnWidth(0, 120)
+        cab.setSectionResizeMode(1, QHeaderView.Stretch)
+        cab.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        configurar_tabla_erp(self.tabla_productos, derecha=(2,), altura_fila=40)
+        self.tabla_productos.verticalScrollBar().valueChanged.connect(self._on_scroll_productos)
+        self.tabla_productos.cellClicked.connect(lambda fila, _c: self._agregar_fila(fila))
+        tarjeta.cuerpo.addWidget(self.tabla_productos, 1)
+
+        ayuda = QLabel("Haz clic en un producto para agregarlo.  Enter en el buscador agrega el primero.")
+        ayuda.setProperty("class", "ayuda")
+        ayuda.setWordWrap(True)
+        tarjeta.cuerpo.addWidget(ayuda)
+        return tarjeta
+
+    def _construir_panel_usado(self) -> QWidget:
+        tarjeta = Card("Usado en esta atención")
+
+        incluidos = [i for i in self.reserva.get("items", []) if i["tipo"] == "producto"]
+        if incluidos:
+            texto = ", ".join(f"{i['nombre']} × {i['cantidad']:g}" for i in incluidos)
+            nota = QLabel(f"Ya incluido en el servicio (se descuenta solo): {texto}")
+            nota.setProperty("class", "ayuda")
+            nota.setWordWrap(True)
+            tarjeta.cuerpo.addWidget(nota)
+
+        self.tabla = QTableWidget(0, 6)
+        self.tabla.setHorizontalHeaderLabels(["Producto", "Medida", "Cantidad", "Cobrar", "Importe", ""])
+        configurar_tabla_erp(self.tabla, derecha=(self.COL_IMPORTE,), centro=(self.COL_COBRAR,), altura_fila=44)
+        self.tabla.setSelectionMode(QTableWidget.NoSelection)
+        self.tabla.setFocusPolicy(Qt.NoFocus)
+        encabezado = self.tabla.horizontalHeader()
+        encabezado.setSectionResizeMode(self.COL_PRODUCTO, QHeaderView.Stretch)
+        for columna, ancho in ((self.COL_MEDIDA, 190), (self.COL_CANTIDAD, 110), (self.COL_COBRAR, 66),
+                               (self.COL_IMPORTE, 96), (self.COL_QUITAR, 56)):
+            encabezado.setSectionResizeMode(columna, QHeaderView.Fixed)
+            self.tabla.setColumnWidth(columna, ancho)
+        tarjeta.cuerpo.addWidget(self.tabla, 1)
+
+        self.label_vacio = QLabel("Aún no agregaste nada.\nElige un producto de la lista, o continúa sin "
+                                  "insumos si no usaste ninguno.")
+        self.label_vacio.setProperty("class", "ayuda")
+        self.label_vacio.setAlignment(Qt.AlignCenter)
+        self.label_vacio.setWordWrap(True)
+        tarjeta.cuerpo.addWidget(self.label_vacio, 1)
+
+        self.label_total = QLabel()
+        self.label_total.setTextFormat(Qt.RichText)
+        self.label_total.setAlignment(Qt.AlignRight)
+        tarjeta.cuerpo.addWidget(self.label_total)
+        return tarjeta
+
+    # --------------------------------------------- Lista de productos ----
+    def _cargar_categorias(self) -> None:
+        categorias = self.producto_service.categorias_con_productos()
+        self.scroll_categorias.setVisible(bool(categorias))
+        opciones = [("Todas", None)] + [(c["nombre"], c["id"]) for c in categorias]
+        for posicion, (nombre, categoria_id) in enumerate(opciones):
+            boton = QPushButton(nombre)
+            boton.setObjectName("chipCategoria")
+            boton.setCheckable(True)
+            boton.setCursor(Qt.PointingHandCursor)
+            boton.setChecked(categoria_id is None)
+            boton.clicked.connect(lambda _=False, c=categoria_id: self._filtrar_por_categoria(c))
+            self.grupo_categorias.addButton(boton)
+            self.fila_categorias.insertWidget(posicion, boton)
+
+    def _filtrar_por_categoria(self, categoria_id) -> None:
+        self._categoria_filtro = categoria_id
+        self._buscar_productos()
+        self.input_busqueda.setFocus()
+
+    def _buscar_productos(self) -> None:
+        """Nueva búsqueda: vuelve al inicio de la lista."""
+        self._cargar_productos(offset=0)
+
+    def _on_scroll_productos(self) -> None:
+        if self._hay_mas_productos and cerca_del_final(self.tabla_productos):
+            self._cargar_productos(offset=self._productos_cargados)
+
+    def _cargar_productos(self, offset: int) -> None:
+        # Se pide uno de más solo para saber si queda otra página; nunca se muestra.
+        productos = self.producto_service.listar(
+            self.input_busqueda.text(), self.TAMANO_PAGINA + 1, offset, self._categoria_filtro)
+        self._hay_mas_productos = len(productos) > self.TAMANO_PAGINA
+        nuevos = productos[:self.TAMANO_PAGINA]
+        with carga_rapida(self.tabla_productos):
+            if offset == 0:
+                self.tabla_productos.setRowCount(0)
+            inicio = self.tabla_productos.rowCount()
+            self.tabla_productos.setRowCount(inicio + len(nuevos))
+            for i, p in enumerate(nuevos):
+                fila = inicio + i
+                categoria = QTableWidgetItem(p.categoria_nombre or "Sin categoría")
+                categoria.setToolTip(p.categoria_nombre or "Sin categoría")
+                self.tabla_productos.setItem(fila, 0, categoria)
+                nombre = QTableWidgetItem(p.nombre)
+                nombre.setToolTip(p.nombre)
+                nombre.setData(Qt.UserRole, {
+                    "id": p.id, "nombre": p.nombre, "unidad_medida": p.unidad_medida,
+                    "precio": float(p.precio_venta_actual), "stock_actual": float(p.stock_actual)})
+                self.tabla_productos.setItem(fila, 1, nombre)
+                stock = item_derecha(f"{p.stock_actual:g} {p.unidad_medida}".strip())
+                colorear_stock(stock, p.agotado, p.stock_bajo, self._tema)
+                self.tabla_productos.setItem(fila, 2, stock)
+        self._productos_cargados = self.tabla_productos.rowCount()
+
+    def _enter_en_busqueda(self) -> None:
+        """Enter en el buscador: busca ya y agrega el primer resultado."""
+        self._timer_busqueda.stop()
+        self._buscar_productos()
+        if self.tabla_productos.rowCount() > 0:
+            self._agregar_fila(0)
+
+    # ------------------------------------------------------ Líneas ----
+    def _agregar_fila(self, fila: int) -> None:
+        item = self.tabla_productos.item(fila, 1)
+        producto = item.data(Qt.UserRole) if item else None
+        if not producto:
+            return
+        existente = next((l for l in self._lineas if l["producto"]["id"] == producto["id"]), None)
+        if existente:   # ya está en la lista: se suma una más en vez de repetir la fila
+            existente["spin"].setValue(existente["spin"].value() + 1)
+            return
+        self._crear_linea(producto)
+
+    def _crear_linea(self, producto: dict) -> None:
+        fila = self.tabla.rowCount()
+        self.tabla.insertRow(fila)
+        unidad = (producto.get("unidad_medida") or "").strip() or "unidad"
+
+        celda = QTableWidgetItem(producto["nombre"])
+        celda.setToolTip(f"{producto['nombre']}\nStock disponible: {producto['stock_actual']:g} {unidad}")
+        self.tabla.setItem(fila, self.COL_PRODUCTO, celda)
+
+        # Medida: la unidad base del producto (gramos, unidad...) o una de sus presentaciones.
+        combo = QComboBox()
+        combo.addItem(f"{unidad} (base)", (None, 1.0, float(producto["precio"])))
+        for pres in self.producto_service.presentaciones(producto["id"]):
+            combo.addItem(f"{pres.nombre} (x{pres.cantidad_unidades:g})",
+                          (pres.id, float(pres.cantidad_unidades), float(pres.precio)))
+        self.tabla.setCellWidget(fila, self.COL_MEDIDA, combo)
+
+        spin = QDoubleSpinBox()
+        spin.setLocale(_LOCALE_PUNTO)   # punto decimal aunque Windows use coma
+        spin.setDecimals(2)
+        spin.setRange(0.01, 999999)
+        spin.setValue(1)
+        self.tabla.setCellWidget(fila, self.COL_CANTIDAD, spin)
+
+        # Cobrar: por defecto solo si el producto tiene precio de venta.
+        check = QCheckBox()
+        check.setChecked(float(producto["precio"]) > 0)
+        check.setToolTip("Marcado: se suma a la boleta. Desmarcado: solo descuenta del inventario.")
+        contenedor = QWidget()
+        lay = QHBoxLayout(contenedor)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setAlignment(Qt.AlignCenter)
+        lay.addWidget(check)
+        self.tabla.setCellWidget(fila, self.COL_COBRAR, contenedor)
+
+        boton = QPushButton()
+        boton.setProperty("class", "danger")
+        boton.setIcon(icono("papelera", "#ffffff", 16))
+        boton.setToolTip("Quitar de la lista")
+        compactar_boton(boton)
+        self.tabla.setCellWidget(fila, self.COL_QUITAR, boton)
+
+        linea = {"producto": producto, "combo": combo, "spin": spin, "check": check}
+        self._lineas.append(linea)
+        combo.currentIndexChanged.connect(self._refrescar)
+        spin.valueChanged.connect(self._refrescar)
+        check.toggled.connect(self._refrescar)
+        boton.clicked.connect(lambda _=False, l=linea: self._quitar(l))
+        self._refrescar()
+        self.tabla.scrollToBottom()
+
+    def _quitar(self, linea: dict) -> None:
+        indice = self._lineas.index(linea)
+        self._lineas.pop(indice)
+        self.tabla.removeRow(indice)
+        self._refrescar()
+
+    @staticmethod
+    def _medida_de(linea: dict) -> tuple:
+        """(id de la presentación o None, unidades base que equivale 1, precio de 1) de la línea."""
+        return linea["combo"].currentData() or (None, 1.0, 0.0)
+
+    def _importe_de(self, linea: dict) -> float:
+        if not linea["check"].isChecked():
+            return 0.0
+        return round(linea["spin"].value() * self._medida_de(linea)[2], 2)
+
+    def _refrescar(self, *_) -> None:
+        total = 0.0
+        for fila, linea in enumerate(self._lineas):
+            importe = self._importe_de(linea)
+            total += importe
+            texto = formatear_moneda(importe, self.moneda) if linea["check"].isChecked() else "Sin costo"
+            self.tabla.setItem(fila, self.COL_IMPORTE, item_derecha(texto))
+        self.tabla.setVisible(bool(self._lineas))
+        self.label_vacio.setVisible(not self._lineas)
+        if self._lineas:
+            self.label_total.setText(
+                "Se suma a la boleta: "
+                f"<span style='font-size:18px; font-weight:700'>{formatear_moneda(total, self.moneda)}</span>")
+        else:
+            self.label_total.setText("")
+        self.btn_continuar.setText("Continuar" if self._lineas else "Continuar sin insumos")
+
+    # ------------------------------------------------------ Resultado ----
+    def _continuar(self) -> None:
+        # Stock: se suma lo usado por producto (puede haber dos líneas con medidas distintas)
+        # más lo que el servicio ya descuenta solo.
+        necesario: dict[int, float] = dict(self._ya_incluidos)
+        for linea in self._lineas:
+            _, factor, _ = self._medida_de(linea)
+            producto_id = linea["producto"]["id"]
+            necesario[producto_id] = necesario.get(producto_id, 0.0) + linea["spin"].value() * factor
+        for linea in self._lineas:
+            producto = self.producto_service.obtener(linea["producto"]["id"])
+            if not producto:
+                QMessageBox.warning(self, "Producto no disponible",
+                                    f"«{linea['producto']['nombre']}» ya no existe. Quítalo de la lista.")
+                return
+            if producto.stock_actual + 1e-9 < necesario[producto.id]:
+                unidad = (producto.unidad_medida or "").strip()
+                QMessageBox.warning(
+                    self, "Stock insuficiente",
+                    f"No alcanza el stock de «{producto.nombre}».\n\n"
+                    f"Disponible: {producto.stock_actual:g} {unidad}\n"
+                    f"Necesario: {necesario[producto.id]:g} {unidad}\n\n"
+                    "Baja la cantidad o repón stock en Compras/Inventario.")
+                return
+        self.consumos = [{
+            "producto_id": l["producto"]["id"],
+            "cantidad": l["spin"].value(),
+            "presentacion_id": self._medida_de(l)[0],
+            "cobrar": l["check"].isChecked(),
+        } for l in self._lineas]
+        self.accept()
+
+
 class CobrarDialog(QDialog):
     """Cobra la reserva. Muestra el desglose, descuenta los adelantos ya recibidos y
     cobra solo el saldo."""
 
-    def __init__(self, reserva: dict, usuario, parent=None):
+    def __init__(self, reserva: dict, usuario, parent=None, consumos: list[dict] | None = None):
         super().__init__(parent)
         self.reserva = reserva
         self.usuario = usuario
@@ -613,7 +979,11 @@ class CobrarDialog(QDialog):
         config = ConfiguracionService()
         self.moneda = config.obtener().get("moneda", "S/")
         self._caja_abierta = bool(CajaService().estado_actual(usuario.id).get("abierta"))
-        self._subtotal = reserva["total_estimado"]
+        # Insumos y productos usados al atender (paso anterior): los cobrados suman al total.
+        # Si algo ya no es válido (p. ej. se acabó el stock) lanza ReservaError y no se abre.
+        self.consumos = consumos or []
+        self._extras = self.service.items_de_consumo(self.consumos)
+        self._subtotal = round(reserva["total_estimado"] + sum(i["subtotal"] for i in self._extras), 2)
         self._adelantos = reserva["adelanto_total"]
 
         self.setWindowTitle("Marcar como atendida y cobrar el saldo")
@@ -632,6 +1002,15 @@ class CobrarDialog(QDialog):
             importe = QLabel(formatear_moneda(linea["subtotal"], self.moneda))
             importe.setAlignment(Qt.AlignRight)
             desglose.addWidget(importe, i, 1)
+        for j, extra in enumerate(self._extras, start=len(ReservaService.lineas_boleta(reserva))):
+            cantidad = f" × {extra['cantidad']:g}" if extra["cantidad"] != 1 else ""
+            desglose.addWidget(QLabel(f"{extra['nombre']}{cantidad}"), j, 0)
+            importe = QLabel(formatear_moneda(extra["subtotal"], self.moneda) if extra["subtotal"] > 0
+                             else "Sin costo")
+            importe.setAlignment(Qt.AlignRight)
+            if extra["subtotal"] <= 0:
+                importe.setProperty("class", "ayuda")
+            desglose.addWidget(importe, j, 1)
         desglose.setColumnStretch(0, 1)
         raiz.addSpacing(6)
         raiz.addLayout(desglose)
@@ -738,7 +1117,8 @@ class CobrarDialog(QDialog):
             recibido = self.input_recibido.value() if self._pide_recibido else 0.0
             self.resultado = self.service.cobrar(
                 self.reserva["id"], self.usuario.id, metodo["id"] if metodo else None,
-                self.input_descuento.value(), recibido if recibido > 0 else None)
+                self.input_descuento.value(), recibido if recibido > 0 else None,
+                consumos=self.consumos)
         except ReservaError as e:
             QMessageBox.warning(self, "No se pudo cobrar", str(e))
             return
@@ -974,7 +1354,12 @@ class DetalleReservaDialog(QDialog):
         filas = [[r["servicio_nombre"], "Servicio", dinero(r["precio"])]]
         for item in r["items"]:
             cantidad = f" × {item['cantidad']:g}" if item["cantidad"] != 1 else ""
-            tipo = "Sub-servicio" if item["tipo"] == "subservicio" else "Producto"
+            if item["tipo"] == "subservicio":
+                tipo = "Sub-servicio"
+            elif item["tipo"] == "insumo":
+                tipo = "Producto" if item["subtotal"] > 0 else "Insumo"
+            else:
+                tipo = "Producto"
             costo = dinero(item["subtotal"]) if item["subtotal"] > 0 else "Incluido"
             filas.append([f"{item['nombre']}{cantidad}", tipo, costo])
         tarjeta.cuerpo.addWidget(self._tabla(["Concepto", "Tipo", "Importe"], filas, derecha=(2,)))
@@ -1120,12 +1505,24 @@ class DetalleReservaDialog(QDialog):
     # ----------------------------------------------------- Acciones ----
     def _marcar_atendida(self) -> None:
         """El negocio confirma que el servicio ya se realizó. Pagar (adelanto o total) no
-        marca la cita como atendida: eso se valida aquí. Si todavía debe saldo se abre el
-        cobro; si ya pagó todo se confirma y se genera la boleta final, que se envía por
-        correo si el cliente tiene uno."""
+        marca la cita como atendida: eso se valida aquí.
+
+        Primero se registran los insumos y productos usados (descuentan stock; los cobrados
+        suman a la boleta). Si después todavía hay saldo por pagar se abre el cobro; si ya
+        pagó todo se confirma y se genera la boleta final, que se envía por correo si el
+        cliente tiene uno."""
         r = self.reserva
-        if r["saldo_estimado"] > 0:
-            self._cobrar()  # todavía debe saldo: se cobra y recién ahí queda atendida
+        insumos = InsumosDialog(r, self)
+        if insumos.exec() != QDialog.Accepted:
+            return
+        consumos = insumos.consumos
+        try:
+            extra = sum(i["subtotal"] for i in self.service.items_de_consumo(consumos))
+        except ReservaError as e:
+            QMessageBox.warning(self, "No se pudo marcar como atendida", str(e))
+            return
+        if r["saldo_estimado"] + extra > 0.004:
+            self._cobrar(consumos)  # todavía debe saldo: se cobra y recién ahí queda atendida
             return
         confirmacion = QMessageBox.question(
             self, "Marcar como atendida",
@@ -1136,7 +1533,7 @@ class DetalleReservaDialog(QDialog):
         if confirmacion != QMessageBox.Yes:
             return
         try:
-            reserva = self.service.cobrar(r["id"], self.usuario.id, None)
+            reserva = self.service.cobrar(r["id"], self.usuario.id, None, consumos=consumos)
         except ReservaError as e:
             QMessageBox.warning(self, "No se pudo marcar como atendida", str(e))
             return
@@ -1147,8 +1544,12 @@ class DetalleReservaDialog(QDialog):
         BoletaDialog(reserva, self).exec()
         self._construir()
 
-    def _cobrar(self) -> None:
-        dialogo = CobrarDialog(self.reserva, self.usuario, self)
+    def _cobrar(self, consumos: list[dict] | None = None) -> None:
+        try:
+            dialogo = CobrarDialog(self.reserva, self.usuario, self, consumos)
+        except ReservaError as e:
+            QMessageBox.warning(self, "No se pudo cobrar", str(e))
+            return
         if dialogo.exec() != QDialog.Accepted:
             return
         self.cambio = True

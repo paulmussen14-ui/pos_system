@@ -586,7 +586,11 @@ CREATE INDEX IF NOT EXISTS idx_servicio_productos_servicio ON servicio_productos
 
 -- ------------------------------------------------------------
 -- RESERVA_ITEMS: sub-servicios y productos elegidos en una reserva (copia de nombre y
--- precio del momento). tipo: subservicio | producto. El servicio base va en reservas.precio.
+-- precio del momento). tipo: subservicio | producto | insumo. El servicio base va en reservas.precio.
+-- insumo = producto o insumo registrado al marcar la reserva como atendida: descuenta stock y,
+-- si se cobra, suma a la boleta. Para los insumos, cantidad y precio_unitario están en la
+-- medida elegida (gramos, unidad, paquete...) y factor_unidades dice a cuántas unidades base
+-- del producto equivale cada una (el stock baja cantidad x factor_unidades).
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS reserva_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -596,7 +600,9 @@ CREATE TABLE IF NOT EXISTS reserva_items (
     nombre TEXT NOT NULL,
     cantidad REAL NOT NULL DEFAULT 1,
     precio_unitario REAL NOT NULL DEFAULT 0,
-    subtotal REAL NOT NULL DEFAULT 0
+    subtotal REAL NOT NULL DEFAULT 0,
+    presentacion_nombre TEXT,
+    factor_unidades REAL NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_reserva_items_reserva ON reserva_items(reserva_id);
 
