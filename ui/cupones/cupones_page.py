@@ -1,13 +1,15 @@
 """Cupones: el sistema genera el código; aquí se configuran y se activan o desactivan."""
 
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QThreadPool
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QDialog, QFormLayout, QComboBox, QDoubleSpinBox,
-    QSpinBox, QCheckBox, QDateEdit, QMessageBox,
+    QSpinBox, QCheckBox, QDateEdit, QMessageBox, QFileDialog, QInputDialog,
 )
 
+from printing.cupon_pdf import generar_cupon_pdf, nombre_archivo_cupon
+from services import correo_service
 from services.cupon_service import CuponService, CuponError
 from services.configuracion_service import ConfiguracionService
 from ui.tokens import MARGEN_PAGINA, ESPACIO_MD
@@ -15,7 +17,113 @@ from ui.widgets.card import Card
 from ui.widgets.page_header import PageHeader
 from ui.widgets.status_badge import StatusBadge
 from ui.widgets.tabla_erp import configurar_tabla_erp, item_derecha, item_centro, compactar_boton
-from utils.validators import formatear_moneda
+from utils.logger import logger
+from utils.validators import formatear_moneda, es_email_valido
+from utils.worker import Worker
+
+
+# ====================================================================
+# PDF y correo del cupón
+# ====================================================================
+def guardar_cupon_pdf(parent, cupon: dict) -> None:
+    """Pide dónde guardar y crea el PDF del cupón."""
+    config_negocio = ConfiguracionService().obtener()
+    ruta, _ = QFileDialog.getSaveFileName(
+        parent, "Guardar cupón en PDF", nombre_archivo_cupon(cupon), "PDF (*.pdf)")
+    if not ruta:
+        return
+    if not ruta.lower().endswith(".pdf"):
+        ruta += ".pdf"
+    try:
+        generar_cupon_pdf(cupon, config_negocio, ruta)
+    except Exception as exc:
+        QMessageBox.warning(parent, "No se pudo guardar el PDF", str(exc))
+        return
+    QMessageBox.information(parent, "Cupón guardado", f"El PDF se guardó en:\n{ruta}")
+
+
+def enviar_cupon_por_correo(parent, cupon: dict) -> None:
+    """Pide el correo del cliente, genera el PDF y lo envía sin congelar la pantalla."""
+    if not correo_service.correo_configurado():
+        QMessageBox.information(
+            parent, "Falta configurar el correo",
+            "Para enviar cupones por correo, primero completa los datos en "
+            "Configuración → Correo.")
+        return
+    destinatario, ok = QInputDialog.getText(
+        parent, "Enviar cupón por correo", f"Correo del cliente para el cupón {cupon['codigo']}:")
+    if not ok:
+        return
+    destinatario = destinatario.strip()
+    if not es_email_valido(destinatario):
+        QMessageBox.warning(parent, "Correo no válido", "Escribe un correo válido.")
+        return
+
+    config_negocio = ConfiguracionService().obtener()
+    try:
+        ruta_pdf = generar_cupon_pdf(cupon, config_negocio)
+    except Exception as exc:
+        QMessageBox.warning(parent, "No se pudo crear el PDF", str(exc))
+        return
+
+    datos, nombre_negocio = correo_service.cargar_datos_correo()
+    asunto, cuerpo = correo_service.armar_correo_cupon(cupon, config_negocio)
+
+    def terminado(error) -> None:
+        if error:
+            logger.warning("Cupón %s no enviado: %s", cupon["codigo"], error)
+            QMessageBox.warning(None, "No se pudo enviar el cupón", error)
+            return
+        QMessageBox.information(None, "Cupón enviado", f"El cupón se envió a {destinatario}.")
+
+    worker = Worker(correo_service.enviar_correo_seguro, destinatario, asunto, cuerpo,
+                    [ruta_pdf], datos, nombre_negocio)
+    worker.signals.finished.connect(terminado)
+    worker.signals.error.connect(lambda _: terminado("Ocurrió un error inesperado al enviar."))
+    QThreadPool.globalInstance().start(worker)
+    QMessageBox.information(parent, "Enviando cupón",
+                            f"Enviando el cupón a {destinatario}... Te avisaremos cuando termine.")
+
+
+class CuponCreadoDialog(QDialog):
+    """Se muestra al crear un cupón: copiar código, descargar PDF o enviarlo por correo."""
+
+    def __init__(self, cupon: dict, parent=None):
+        super().__init__(parent)
+        self.cupon = cupon
+        self.setWindowTitle("Cupón creado")
+        self.setMinimumWidth(420)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(ESPACIO_MD)
+
+        titulo = QLabel("¡Cupón creado!")
+        titulo.setProperty("class", "titulo")
+        layout.addWidget(titulo)
+        codigo = QLabel(cupon["codigo"])
+        codigo.setAlignment(Qt.AlignCenter)
+        codigo.setStyleSheet("font-size: 24px; font-weight: 700; letter-spacing: 2px; padding: 10px;")
+        codigo.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(codigo)
+        ayuda = QLabel("El código ya se copió al portapapeles.")
+        ayuda.setProperty("class", "ayuda")
+        ayuda.setAlignment(Qt.AlignCenter)
+        layout.addWidget(ayuda)
+
+        fila = QHBoxLayout()
+        btn_pdf = QPushButton("Descargar PDF")
+        btn_pdf.setProperty("class", "success")
+        btn_pdf.clicked.connect(lambda: guardar_cupon_pdf(self, self.cupon))
+        btn_correo = QPushButton("Enviar por correo")
+        btn_correo.setProperty("class", "secondary")
+        btn_correo.clicked.connect(lambda: enviar_cupon_por_correo(self, self.cupon))
+        fila.addWidget(btn_pdf)
+        fila.addWidget(btn_correo)
+        layout.addLayout(fila)
+
+        cerrar = QPushButton("Cerrar")
+        cerrar.setProperty("class", "secondary")
+        cerrar.clicked.connect(self.accept)
+        layout.addWidget(cerrar)
 
 
 class CuponDialog(QDialog):
@@ -145,7 +253,7 @@ class CuponesPage(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.Fixed)
         self.tabla.setColumnWidth(6, 110)
         self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.Fixed)
-        self.tabla.setColumnWidth(7, 320)
+        self.tabla.setColumnWidth(7, 470)
         tarjeta.cuerpo.addWidget(self.tabla, 1)
         self.label_vacio = QLabel("Aún no hay cupones. Crea el primero con «Generar cupón».")
         self.label_vacio.setProperty("class", "ayuda")
@@ -191,6 +299,8 @@ class CuponesPage(QWidget):
             fila.setContentsMargins(4, 4, 4, 4)
             fila.setSpacing(6)
             for texto, fn in (("Copiar", lambda _, cc=c: self._copiar(cc)),
+                              ("PDF", lambda _, cc=c: guardar_cupon_pdf(self, cc)),
+                              ("Correo", lambda _, cc=c: enviar_cupon_por_correo(self, cc)),
                               ("Desactivar" if c["activo"] else "Activar", lambda _, cc=c: self._alternar(cc)),
                               ("Eliminar", lambda _, cc=c: self._eliminar(cc))):
                 b = QPushButton(texto)
@@ -205,8 +315,9 @@ class CuponesPage(QWidget):
         if d.exec() == QDialog.Accepted:
             self.actualizar()
             QGuiApplication.clipboard().setText(d.codigo_creado or "")
-            QMessageBox.information(self, "Cupón creado",
-                                    f"Código: {d.codigo_creado}\n(Copiado al portapapeles)")
+            cupon = self.service.obtener_por_codigo(d.codigo_creado or "")
+            if cupon:
+                CuponCreadoDialog(cupon, self).exec()
 
     def _copiar(self, c: dict) -> None:
         QGuiApplication.clipboard().setText(c["codigo"])

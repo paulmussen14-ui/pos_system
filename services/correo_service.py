@@ -250,3 +250,33 @@ def armar_correo_boleta(reserva: dict, config_negocio: dict) -> tuple[str, str]:
     if direccion:
         lineas.append(direccion)
     return asunto, "\n".join(lineas) + "\n"
+
+
+def armar_correo_cupon(cupon: dict, config_negocio: dict, nombre_cliente: str = "") -> tuple[str, str]:
+    """(asunto, cuerpo) del correo que acompaña al cupón de descuento en PDF."""
+    from printing.cupon_pdf import texto_vigencia
+    negocio = (config_negocio.get("nombre_negocio") or "").strip() or "Nuestro negocio"
+    moneda = config_negocio.get("moneda", "S/")
+    asunto = f"Tu cupón de descuento - {negocio}"
+    valor = (f"{cupon['valor']:g}%" if cupon["tipo"] == "porcentaje"
+             else formatear_moneda(cupon["valor"], moneda))
+    saludo = f"Hola {nombre_cliente.strip()}," if nombre_cliente.strip() else "Hola,"
+    lineas = [
+        saludo,
+        "",
+        f"Te regalamos un cupón de {valor} de descuento en {negocio}.",
+        "",
+        f"Código: {cupon['codigo']}",
+        texto_vigencia(cupon),
+    ]
+    if cupon.get("compra_minima"):
+        lineas.append(f"Compra mínima: {formatear_moneda(cupon['compra_minima'], moneda)}")
+    lineas += ["", "Adjuntamos el cupón en PDF. Preséntalo o indica el código al momento de pagar."]
+    telefono = (config_negocio.get("telefono") or "").strip()
+    if telefono:
+        lineas += ["", f"Si tienes alguna consulta, escríbenos al {telefono}."]
+    lineas += ["", negocio]
+    direccion = (config_negocio.get("direccion") or "").strip()
+    if direccion:
+        lineas.append(direccion)
+    return asunto, "\n".join(lineas) + "\n"

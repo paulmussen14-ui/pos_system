@@ -90,6 +90,15 @@ _TRAZOS = {
         '<path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/>'
     ),
     "correo": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+    "candado": (
+        '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
+        '<path d="M12 15v2"/>'
+    ),
+    "ojo": '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    "ojo_tachado": (
+        '<path d="M2 12s3.6-7 10-7c2 0 3.8.7 5.3 1.7"/><path d="M22 12s-3.6 7-10 7c-2 0-3.8-.7-5.3-1.7"/>'
+        '<path d="M3 3l18 18"/>'
+    ),
     "pdf": (
         '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 13h6"/><path d="M9 17h4"/>'
     ),

@@ -55,6 +55,11 @@ class CuponService:
         cur = self.db.get_connection().execute("SELECT * FROM cupones ORDER BY id DESC")
         return [dict(r) for r in cur.fetchall()]
 
+    def obtener_por_codigo(self, codigo: str) -> dict | None:
+        fila = self.db.get_connection().execute(
+            "SELECT * FROM cupones WHERE codigo = ?", ((codigo or "").strip().upper(),)).fetchone()
+        return dict(fila) if fila else None
+
     def cambiar_activo(self, cupon_id: int, activo: bool) -> None:
         with self.db.transaction() as cur:
             cur.execute("UPDATE cupones SET activo = ? WHERE id = ?", (int(activo), cupon_id))
