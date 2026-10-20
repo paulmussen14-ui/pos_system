@@ -534,6 +534,8 @@ CREATE TABLE IF NOT EXISTS reservas (
     pagado_en TEXT,
     boleta_enviada_a TEXT,
     adelanto_aplicado REAL NOT NULL DEFAULT 0,
+    pago_recibido REAL,
+    pago_cambio REAL,
     creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_reservas_fecha ON reservas(fecha, hora_inicio);

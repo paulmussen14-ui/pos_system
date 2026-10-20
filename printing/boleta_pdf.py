@@ -99,6 +99,9 @@ def _html_boleta(reserva: dict, config_negocio: dict) -> str:
     if adelantos > 0:
         filas_totales += fila_total("Adelantos", "- " + formatear_moneda(adelantos, moneda))
         filas_totales += fila_total("<b>Saldo pagado</b>", f"<b>{formatear_moneda(total - adelantos, moneda)}</b>", False)
+    if reserva.get("pago_recibido"):
+        filas_totales += fila_total("Recibido", formatear_moneda(float(reserva["pago_recibido"]), moneda), False)
+        filas_totales += fila_total("Cambio", formatear_moneda(float(reserva.get("pago_cambio") or 0), moneda), False)
 
     notas = (reserva.get("notas") or "").strip()
     notas_html = (

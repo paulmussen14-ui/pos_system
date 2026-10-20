@@ -140,8 +140,9 @@ class ServicioDialog(QDialog):
         pagina = QWidget()
         capa = QVBoxLayout(pagina)
         ayuda = QLabel("Opcional. Productos que se usan o entregan al atender: descuentan stock al "
-                       "cobrar. Marca «Cobrar aparte» para sumar su precio de venta al total; si no, "
-                       "va incluido en el precio del servicio.")
+                       "cobrar. La cantidad va en la unidad en que llevas el stock del producto "
+                       "(ml, g, unidad...): por ejemplo 3 ml de gel por servicio. Marca «Cobrar aparte» "
+                       "para sumar su precio de venta al total; si no, va incluido en el precio del servicio.")
         ayuda.setProperty("class", "ayuda")
         ayuda.setWordWrap(True)
         capa.addWidget(ayuda)
@@ -149,7 +150,7 @@ class ServicioDialog(QDialog):
         self.tabla_prod = QTableWidget(0, 3)
         self.tabla_prod.setHorizontalHeaderLabels(["Producto", "Cantidad", "Cobrar aparte"])
         self.tabla_prod.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.tabla_prod.setColumnWidth(1, 110)
+        self.tabla_prod.setColumnWidth(1, 150)
         self.tabla_prod.setColumnWidth(2, 110)
         self._config_tabla_editable(self.tabla_prod)
         capa.addWidget(self.tabla_prod, 1)
@@ -190,14 +191,23 @@ class ServicioDialog(QDialog):
         fila = self.tabla_prod.rowCount()
         self.tabla_prod.insertRow(fila)
         combo = QComboBox()
+        unidades = {}
         for prod in self._productos_disponibles:
-            combo.addItem(f"{prod['nombre']}  (stock {prod['stock_actual']:g})", prod["id"])
+            unidad = (prod.get("unidad_medida") or "").strip()
+            unidades[prod["id"]] = unidad
+            combo.addItem(f"{prod['nombre']}  (stock {prod['stock_actual']:g} {unidad})".rstrip(), prod["id"])
         if producto_id is not None:
             combo.setCurrentIndex(max(0, combo.findData(producto_id)))
         cant = QDoubleSpinBox()
-        cant.setRange(0.01, 99999)
-        cant.setDecimals(2)
+        cant.setRange(0.001, 99999)
+        cant.setDecimals(3)
         cant.setValue(cantidad)
+        # La unidad se ve junto a la cantidad (ml, g, unidad...) y cambia con el producto elegido.
+        def poner_unidad(_=None, combo=combo, cant=cant, unidades=unidades) -> None:
+            unidad = unidades.get(combo.currentData(), "")
+            cant.setSuffix(f" {unidad}" if unidad else "")
+        combo.currentIndexChanged.connect(poner_unidad)
+        poner_unidad()
         check = QCheckBox("Sí")
         check.setChecked(cobrar)
         contenedor = QWidget()

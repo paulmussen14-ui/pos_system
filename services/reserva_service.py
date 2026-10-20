@@ -402,12 +402,14 @@ class ReservaService:
 
     # ------------------------------------------------------- Cobro ----
     def cobrar(self, reserva_id: int, usuario_id: int, metodo_pago_id: int | None,
-               descuento: float = 0.0) -> dict:
+               descuento: float = 0.0, monto_recibido: float | None = None) -> dict:
         """Cobra la reserva: registra la venta (con el servicio, sus sub-servicios y productos),
         descuenta el stock de los productos, y le asigna el número de boleta.
 
         Solo se paga el SALDO: total - adelantos vigentes. Ese saldo es lo que entra a la caja
         si el método es efectivo (los adelantos en efectivo ya entraron cuando se recibieron).
+        monto_recibido: con cuánto pagó el cliente el saldo en efectivo; si se indica, la boleta
+        muestra el cambio (vuelto). A la caja solo entra el saldo.
         Devuelve la reserva actualizada."""
         reserva = self.obtener(reserva_id)
         if not reserva:
@@ -447,6 +449,15 @@ class ReservaService:
         else:
             metodo_pago_id = None
             metodo_nombre = "Adelantos"
+
+        # Efectivo recibido y cambio: solo si se pagó el saldo en efectivo y se indicó el monto.
+        pago_recibido = pago_cambio = None
+        if saldo > 0 and pago_es_efectivo and monto_recibido:
+            monto_recibido = round(float(monto_recibido), 2)
+            if monto_recibido + 0.001 < saldo:
+                raise ReservaError(
+                    f"El monto recibido ({monto_recibido:.2f}) no alcanza para el saldo ({saldo:.2f}).")
+            pago_recibido, pago_cambio = monto_recibido, round(monto_recibido - saldo, 2)
 
         # Stock de los productos del servicio (antes de tocar nada).
         for item in reserva["items"]:
@@ -494,9 +505,11 @@ class ReservaService:
             cur.execute(
                 """UPDATE reservas SET estado = 'atendida', descuento = ?, total = ?,
                        metodo_pago = ?, numero_boleta = ?, venta_id = ?, adelanto_aplicado = ?,
+                       pago_recibido = ?, pago_cambio = ?,
                        pagado_en = datetime('now', 'localtime')
                    WHERE id = ?""",
-                (descuento, total, metodo_nombre, numero, venta_id, adelantos, reserva_id),
+                (descuento, total, metodo_nombre, numero, venta_id, adelantos,
+                 pago_recibido, pago_cambio, reserva_id),
             )
         return self.obtener(reserva_id)
 
@@ -585,6 +598,9 @@ class ReservaService:
         if adelantos > 0:
             lineas_pago = [f"Adelantos: -{moneda} {adelantos:,.2f}",
                            f"Saldo pagado: {moneda} {total - adelantos:,.2f}"]
+        if reserva.get("pago_recibido"):
+            lineas_pago += [f"Recibido: {moneda} {float(reserva['pago_recibido']):,.2f}",
+                            f"Cambio: {moneda} {float(reserva.get('pago_cambio') or 0):,.2f}"]
         return {
             "id": reserva["id"],
             "titulo_documento": "Boleta",

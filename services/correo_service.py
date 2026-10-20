@@ -159,6 +159,39 @@ def enviar_correo_seguro(*args, **kwargs) -> str | None:
     return None
 
 
+def armar_correo_adelanto(reserva: dict, config_negocio: dict, monto: float) -> tuple[str, str]:
+    """(asunto, cuerpo) del aviso que recibe el cliente cuando paga un adelanto de su reserva."""
+    negocio = (config_negocio.get("nombre_negocio") or "").strip() or "Nuestro negocio"
+    moneda = config_negocio.get("moneda", "S/")
+    dia = fecha_dmy(parsear_fecha(reserva["fecha"]))
+    total = float(reserva.get("total_estimado") or 0)
+    adelantos = float(reserva.get("adelanto_total") or 0)
+    saldo = max(round(total - adelantos, 2), 0.0)
+    asunto = f"Adelanto recibido - tu cita en {negocio}"
+    lineas = [
+        f"Hola {reserva['cliente_nombre']},",
+        "",
+        f"Recibimos tu adelanto de {formatear_moneda(monto, moneda)}. ¡Gracias! Tu reserva está confirmada.",
+        "",
+        f"Servicio: {reserva['servicio_nombre']}",
+        f"Fecha: {dia}, de {reserva['hora_inicio']} a {reserva['hora_fin']}",
+        f"Total del servicio: {formatear_moneda(total, moneda)}",
+        f"Adelantos recibidos: {formatear_moneda(adelantos, moneda)}",
+        (f"Saldo pendiente (se paga al terminar el servicio): {formatear_moneda(saldo, moneda)}"
+         if saldo > 0 else "Tu servicio ya está pagado por completo."),
+        "",
+        "Cuando termine tu servicio te enviaremos tu boleta por este mismo medio.",
+    ]
+    telefono = (config_negocio.get("telefono") or "").strip()
+    if telefono:
+        lineas += ["", f"Si necesitas reprogramar o tienes alguna consulta, escríbenos al {telefono}."]
+    lineas += ["", negocio]
+    direccion = (config_negocio.get("direccion") or "").strip()
+    if direccion:
+        lineas.append(direccion)
+    return asunto, "\n".join(lineas) + "\n"
+
+
 def armar_correo_boleta(reserva: dict, config_negocio: dict) -> tuple[str, str]:
     """(asunto, cuerpo) del correo que acompaña a la boleta en PDF."""
     negocio = (config_negocio.get("nombre_negocio") or "").strip() or "Nuestro negocio"

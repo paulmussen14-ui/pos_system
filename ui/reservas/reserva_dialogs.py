@@ -70,6 +70,33 @@ def enviar_boleta_por_correo(parent, reserva: dict, destinatario: str) -> None:
                             f"Enviando la boleta a {destinatario}... Te avisaremos cuando termine.")
 
 
+def avisar_adelanto_por_correo(reserva_id: int, monto: float) -> None:
+    """Avisa por correo al cliente que recibimos su adelanto. Solo si la reserva tiene correo
+    y el correo del negocio está configurado; si no, no hace nada. Va en segundo plano y no
+    interrumpe: solo se muestra algo si el envío falla."""
+    if not monto or monto <= 0 or not correo_service.correo_configurado():
+        return
+    reserva = ReservaService().obtener(reserva_id)
+    destinatario = ((reserva or {}).get("cliente_email") or "").strip()
+    if not destinatario:
+        return
+    config_negocio = ConfiguracionService().obtener()
+    datos, nombre_negocio = correo_service.cargar_datos_correo()
+    asunto, cuerpo = correo_service.armar_correo_adelanto(reserva, config_negocio, monto)
+
+    def terminado(error) -> None:
+        if error:
+            QMessageBox.warning(
+                None, "No se pudo avisar el adelanto por correo",
+                f"El adelanto se registró, pero no se pudo enviar el correo a {destinatario}.\n\n{error}")
+
+    worker = Worker(correo_service.enviar_correo_seguro, destinatario, asunto, cuerpo,
+                    [], datos, nombre_negocio)
+    worker.signals.finished.connect(terminado)
+    worker.signals.error.connect(lambda _: terminado("Ocurrió un error inesperado al enviar."))
+    QThreadPool.globalInstance().start(worker)
+
+
 def guardar_boleta_pdf(parent, reserva: dict) -> None:
     """Pide dónde guardar y crea el PDF de la boleta."""
     config_negocio = ConfiguracionService().obtener()
@@ -243,7 +270,7 @@ class ReservaDialog(QDialog):
         self.input_telefono = QLineEdit()
         formulario.addRow("Teléfono:", self.input_telefono)
         self.input_email = QLineEdit()
-        self.input_email.setPlaceholderText("Para enviarle la boleta (opcional)")
+        self.input_email.setPlaceholderText("Recibe aviso de adelanto y boleta (opcional)")
         formulario.addRow("Correo:", self.input_email)
         self.input_notas = QLineEdit()
         self.input_notas.setPlaceholderText("Motivo, observaciones... (opcional)")
@@ -336,7 +363,8 @@ class ReservaDialog(QDialog):
         for prod in self.servicio_service.listar_productos(servicio_id):
             detalle = (f"+{self.moneda} {prod['precio'] * prod['cantidad']:.2f}" if prod["cobrar"]
                        else "incluido")
-            item = QListWidgetItem(f"{prod['nombre']} × {prod['cantidad']:g}  ({detalle})")
+            cantidad_txt = f"{prod['cantidad']:g} {(prod.get('unidad_medida') or '').strip()}".strip()
+            item = QListWidgetItem(f"{prod['nombre']} × {cantidad_txt}  ({detalle})")
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             marcado = marcados_prod is None or prod["producto_id"] in marcados_prod
             item.setCheckState(Qt.Checked if marcado else Qt.Unchecked)
@@ -499,6 +527,8 @@ class ReservaDialog(QDialog):
         except ReservaError as e:
             QMessageBox.warning(self, "No se pudo guardar la reserva", str(e))
             return
+        if not self.reserva and adelanto > 0:
+            avisar_adelanto_por_correo(self.reserva_id, adelanto)
         self.accept()
 
 
@@ -557,6 +587,17 @@ class CobrarDialog(QDialog):
                 self.combo_metodo.addItem(metodo["nombre"], metodo)
         self.combo_metodo.currentIndexChanged.connect(self._actualizar)
         formulario.addRow("Método de pago del saldo:", self.combo_metodo)
+
+        # Solo en efectivo: con cuánto paga el cliente, para mostrar el cambio (vuelto) en la boleta.
+        self._pide_recibido = False
+        self.label_recibido = QLabel("El cliente paga con:")
+        self.input_recibido = QDoubleSpinBox()
+        self.input_recibido.setDecimals(2)
+        self.input_recibido.setMaximum(99999)
+        self.input_recibido.setPrefix(f"{self.moneda} ")
+        self.input_recibido.setSpecialValueText("Monto exacto (sin cambio)")
+        self.input_recibido.valueChanged.connect(self._actualizar)
+        formulario.addRow(self.label_recibido, self.input_recibido)
         raiz.addLayout(formulario)
 
         self.label_total = QLabel()
@@ -607,11 +648,21 @@ class CobrarDialog(QDialog):
         necesita_pago = saldo > 0
         self.combo_metodo.setEnabled(necesita_pago and self.combo_metodo.count() > 0)
         metodo = self.combo_metodo.currentData()
+        self._pide_recibido = bool(necesita_pago and metodo and metodo.get("es_efectivo"))
+        self.label_recibido.setVisible(self._pide_recibido)
+        self.input_recibido.setVisible(self._pide_recibido)
+        recibido = self.input_recibido.value() if self._pide_recibido else 0.0
         aviso = ""
         if saldo < 0:
             aviso = "El descuento deja el total por debajo de los adelantos recibidos. Baja el descuento."
         elif necesita_pago and metodo and metodo.get("es_efectivo") and not self._caja_abierta:
             aviso = "Abre la caja (menú Caja) para poder cobrar en efectivo."
+        elif recibido > 0 and recibido + 0.001 < saldo:
+            aviso = "El monto con el que paga el cliente no alcanza para el saldo."
+        if recibido > 0 and recibido + 0.001 >= saldo:
+            texto += (f"<br><span style='font-size:15px'>Recibido: {formatear_moneda(recibido, self.moneda)}"
+                      f" · <b>Cambio: {formatear_moneda(recibido - saldo, self.moneda)}</b></span>")
+            self.label_total.setText(texto)
         self.label_aviso.setText(aviso)
         self.label_aviso.setVisible(bool(aviso))
         self.btn_cobrar.setEnabled(not aviso and (not necesita_pago or self.combo_metodo.count() > 0))
@@ -620,9 +671,10 @@ class CobrarDialog(QDialog):
         saldo = round(self._subtotal - self.input_descuento.value() - self._adelantos, 2)
         metodo = self.combo_metodo.currentData() if saldo > 0 else None
         try:
+            recibido = self.input_recibido.value() if self._pide_recibido else 0.0
             self.resultado = self.service.cobrar(
                 self.reserva["id"], self.usuario.id, metodo["id"] if metodo else None,
-                self.input_descuento.value())
+                self.input_descuento.value(), recibido if recibido > 0 else None)
         except ReservaError as e:
             QMessageBox.warning(self, "No se pudo cobrar", str(e))
             return
@@ -685,6 +737,7 @@ class AdelantoDialog(QDialog):
         except ReservaError as e:
             QMessageBox.warning(self, "No se pudo registrar el adelanto", str(e))
             return
+        avisar_adelanto_por_correo(self.reserva["id"], self.input_monto.value())
         self.accept()
 
 

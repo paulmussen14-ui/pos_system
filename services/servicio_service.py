@@ -239,6 +239,6 @@ class ServicioService:
         """Productos reales que se pueden asociar a un servicio (activos; los productos
         ocultos que representan servicios no aparecen)."""
         filas = self.db.get_connection().execute(
-            "SELECT id, nombre, precio_venta_actual AS precio, stock_actual FROM productos "
+            "SELECT id, nombre, precio_venta_actual AS precio, stock_actual, unidad_medida FROM productos "
             "WHERE activo = 1 ORDER BY nombre COLLATE NOCASE").fetchall()
         return [dict(f) for f in filas]
