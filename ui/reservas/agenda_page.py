@@ -19,7 +19,9 @@ from services.reserva_service import (
     ReservaService, ESTADO_RESERVADA, ESTADO_ATENDIDA, ESTADO_NO_ASISTIO,
 )
 from services.servicio_service import ServicioService
-from ui.reservas.reserva_dialogs import ReservaDialog, DetalleReservaDialog
+from ui.reservas.reserva_dialogs import (
+    ReservaDialog, DetalleReservaDialog, enviar_comprobante_reserva_por_correo,
+)
 from ui.tokens import MARGEN_PAGINA, ESPACIO_MD, ESPACIO_SM, paleta
 from ui.widgets.card import Card
 from ui.widgets.page_header import PageHeader
@@ -320,7 +322,7 @@ class AgendaPage(QWidget):
     def _pintar_resumen(self, moneda: str) -> None:
         resumen = self.reserva_service.resumen_del_dia(date.today())
         self.badge_reservas.setText(f"Hoy: {resumen['total']} reserva(s)")
-        self.badge_pendientes.setText(f"{resumen['pendientes']} por cobrar")
+        self.badge_pendientes.setText(f"{resumen['pendientes']} por atender")
         self.badge_cobrado.setText(f"Cobrado hoy: {formatear_moneda(resumen['cobrado'], moneda)}")
         for badge in (self.badge_reservas, self.badge_pendientes, self.badge_cobrado):
             badge.style().unpolish(badge)
@@ -383,6 +385,10 @@ class AgendaPage(QWidget):
             if nueva:
                 self._lunes = lunes_de(parsear_fecha(nueva["fecha"]))
             self.actualizar()
+            if dialogo.reserva_nueva_id:
+                # Con el diálogo ya cerrado: comprobante en PDF + aviso de cita pendiente.
+                reserva_id = dialogo.reserva_nueva_id
+                QTimer.singleShot(0, lambda: enviar_comprobante_reserva_por_correo(reserva_id))
 
     def showEvent(self, evento) -> None:
         super().showEvent(evento)

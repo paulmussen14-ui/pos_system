@@ -175,6 +175,26 @@ def _html_boleta(reserva: dict, config_negocio: dict) -> str:
 """
 
 
+def _escribir_pdf(html_doc: str, destino: Path, titulo: str, creador: str) -> Path:
+    """Dibuja un HTML en un PDF A5 vertical (hilo principal: usa fuentes de Qt)."""
+    destino.parent.mkdir(parents=True, exist_ok=True)
+
+    escritor = QPdfWriter(str(destino))
+    escritor.setResolution(_RESOLUCION_DPI)
+    escritor.setPageSize(QPageSize(QPageSize.A5))
+    escritor.setPageOrientation(QPageLayout.Portrait)
+    escritor.setPageMargins(QMarginsF(14, 14, 14, 14), QPageLayout.Millimeter)
+    escritor.setTitle(titulo)
+    escritor.setCreator(creador)
+
+    documento = QTextDocument()
+    documento.setDocumentMargin(0)
+    documento.setPageSize(QSizeF(escritor.width(), escritor.height()))
+    documento.setHtml(html_doc)
+    documento.print_(escritor)
+    return destino
+
+
 def generar_boleta_pdf(reserva: dict, config_negocio: dict, ruta: Path | str | None = None) -> Path:
     """Crea el PDF de la boleta de una reserva cobrada y devuelve su ruta.
 
@@ -185,19 +205,142 @@ def generar_boleta_pdf(reserva: dict, config_negocio: dict, ruta: Path | str | N
         raise ValueError("La reserva todavía no tiene boleta (no ha sido cobrada).")
 
     destino = Path(ruta) if ruta else ruta_boleta_por_defecto(reserva)
-    destino.parent.mkdir(parents=True, exist_ok=True)
+    return _escribir_pdf(_html_boleta(reserva, config_negocio), destino,
+                         f"Boleta {reserva['boleta_texto']}",
+                         config_negocio.get("nombre_negocio") or "POS Local")
 
-    escritor = QPdfWriter(str(destino))
-    escritor.setResolution(_RESOLUCION_DPI)
-    escritor.setPageSize(QPageSize(QPageSize.A5))
-    escritor.setPageOrientation(QPageLayout.Portrait)
-    escritor.setPageMargins(QMarginsF(14, 14, 14, 14), QPageLayout.Millimeter)
-    escritor.setTitle(f"Boleta {reserva['boleta_texto']}")
-    escritor.setCreator(config_negocio.get("nombre_negocio") or "POS Local")
 
-    documento = QTextDocument()
-    documento.setDocumentMargin(0)
-    documento.setPageSize(QSizeF(escritor.width(), escritor.height()))
-    documento.setHtml(_html_boleta(reserva, config_negocio))
-    documento.print_(escritor)
-    return destino
+# ====================================================================
+# Comprobante de reserva (cita pendiente)
+# ====================================================================
+def nombre_archivo_comprobante(reserva: dict) -> str:
+    """'Reserva_2026-10-21_1930_Jacky_Moncada.pdf'."""
+    cliente = re.sub(r"[^\w\-]+", "_", reserva["cliente_nombre"], flags=re.UNICODE).strip("_")
+    hora = reserva["hora_inicio"].replace(":", "")
+    return f"Reserva_{reserva['fecha'][:10]}_{hora}_{cliente[:30] or 'cliente'}.pdf"
+
+
+def _html_comprobante_reserva(reserva: dict, config_negocio: dict) -> str:
+    esc = html.escape
+    moneda = config_negocio.get("moneda", "S/")
+    negocio = esc((config_negocio.get("nombre_negocio") or "").strip() or "Mi Negocio")
+
+    datos_negocio = []
+    for clave, prefijo in (("direccion", ""), ("telefono", "Tel: ")):
+        valor = (config_negocio.get(clave) or "").strip()
+        if valor:
+            datos_negocio.append(esc(prefijo + valor))
+    datos_negocio_html = "<br>".join(datos_negocio)
+
+    logo_html = ""
+    ruta_logo = config_negocio.get("logo_path")
+    if ruta_logo and Path(ruta_logo).is_file():
+        logo_html = f'<img src="{QUrl.fromLocalFile(ruta_logo).toString()}" height="56"><br>'
+
+    dia = parsear_fecha(reserva["fecha"])
+    cita = f"{fecha_larga(dia).capitalize()}"
+    horario = f"{reserva['hora_inicio']} a {reserva['hora_fin']}"
+
+    lineas = ReservaService.lineas_boleta(reserva)
+    total = float(reserva.get("total_estimado") or sum(l["subtotal"] for l in lineas))
+    adelantos = float(reserva.get("adelanto_total") or 0)
+    saldo = max(round(total - adelantos, 2), 0.0)
+
+    borde = f"border-bottom:1px solid {_COLOR_BORDE};"
+    filas_detalle = ""
+    for linea in lineas:
+        filas_detalle += (
+            f'<tr><td style="{borde}">{esc(linea["nombre"])}</td>'
+            f'<td align="right" style="{borde}">{formatear_moneda(linea["subtotal"], moneda)}</td></tr>'
+        )
+
+    def fila_total(texto: str, valor: str, color: str = _COLOR_SUAVE) -> str:
+        return (f'<tr><td align="right" style="color:{color};">{texto}</td>'
+                f'<td align="right" width="110" style="color:{color};">{valor}</td></tr>')
+
+    filas_totales = (
+        f'<tr><td align="right" style="font-size:13pt; font-weight:bold;">TOTAL</td>'
+        f'<td align="right" width="110" style="font-size:13pt; font-weight:bold;">'
+        f'{formatear_moneda(total, moneda)}</td></tr>'
+    )
+    if adelantos > 0:
+        filas_totales += fila_total("Adelanto recibido", "- " + formatear_moneda(adelantos, moneda))
+    filas_totales += (
+        f'<tr><td align="right" style="font-size:12pt; font-weight:bold; color:{_COLOR_PRIMARIO};">'
+        f'Saldo por pagar</td><td align="right" width="110" style="font-size:12pt; '
+        f'font-weight:bold; color:{_COLOR_PRIMARIO};">{formatear_moneda(saldo, moneda)}</td></tr>'
+    )
+
+    notas = (reserva.get("notas") or "").strip()
+    notas_html = (f'<p style="color:{_COLOR_SUAVE}; margin-top:10px;"><b>Notas:</b> {esc(notas)}</p>'
+                  if notas else "")
+    contacto = " · ".join(esc(x) for x in (reserva.get("cliente_telefono"), reserva.get("cliente_email")) if x)
+    contacto_html = f'<br><span style="color:{_COLOR_SUAVE};">{contacto}</span>' if contacto else ""
+
+    return f"""
+<html><body style="font-family:'Segoe UI','Helvetica','Arial',sans-serif; font-size:10pt; color:{_COLOR_TEXTO};">
+
+<table width="100%" cellspacing="0" cellpadding="0">
+  <tr>
+    <td valign="top">
+      {logo_html}
+      <span style="font-size:17pt; font-weight:bold;">{negocio}</span><br>
+      <span style="color:{_COLOR_SUAVE};">{datos_negocio_html}</span>
+    </td>
+    <td valign="top" align="right">
+      <span style="font-size:9pt; color:{_COLOR_SUAVE};">COMPROBANTE DE RESERVA</span><br>
+      <span style="font-size:15pt; font-weight:bold; color:{_COLOR_PRIMARIO};">Cita pendiente</span><br>
+      <span style="color:{_COLOR_SUAVE};">Reserva N.º {reserva['id']}</span>
+    </td>
+  </tr>
+</table>
+
+<table width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px;"><tr><td bgcolor="{_COLOR_PRIMARIO}" style="font-size:2pt;">&nbsp;</td></tr></table>
+
+<table width="100%" cellspacing="0" cellpadding="8" style="margin-top:8px;">
+  <tr>
+    <td width="50%" valign="top" bgcolor="{_COLOR_FONDO}">
+      <span style="font-size:8pt; color:{_COLOR_SUAVE};">CLIENTE</span><br>
+      <b>{esc(reserva['cliente_nombre'])}</b>{contacto_html}
+    </td>
+    <td width="50%" valign="top" bgcolor="{_COLOR_FONDO}">
+      <span style="font-size:8pt; color:{_COLOR_SUAVE};">TU CITA</span><br>
+      <b>{esc(cita)}</b><br>
+      <span style="font-size:14pt; font-weight:bold; color:{_COLOR_PRIMARIO};">{esc(horario)}</span>
+    </td>
+  </tr>
+</table>
+
+<table width="100%" cellspacing="0" cellpadding="7" style="margin-top:16px; border-collapse:collapse;">
+  <tr bgcolor="{_COLOR_PRIMARIO}">
+    <td style="color:#ffffff;"><b>Servicio</b></td>
+    <td align="right" width="110" style="color:#ffffff;"><b>Importe</b></td>
+  </tr>
+  {filas_detalle}
+</table>
+
+<table width="100%" cellspacing="0" cellpadding="3" style="margin-top:8px;">{filas_totales}</table>
+{notas_html}
+
+<p align="center" style="margin-top:30px; color:{_COLOR_SUAVE};">
+  El saldo se paga al terminar el servicio. Al finalizar recibirás tu boleta por correo.<br>
+  Si necesitas reprogramar, avísanos con anticipación.
+</p>
+<p align="center" style="font-size:7pt; color:#94a3b8;">Comprobante de reserva. No es un comprobante de pago electrónico SUNAT.</p>
+
+</body></html>
+"""
+
+
+def generar_comprobante_reserva_pdf(reserva: dict, config_negocio: dict,
+                                    ruta: Path | str | None = None) -> Path:
+    """PDF que se entrega al cliente al reservar (cita pendiente, con adelanto y saldo).
+    Debe llamarse desde el hilo principal (usa fuentes de Qt)."""
+    if ruta:
+        destino = Path(ruta)
+    else:
+        CARPETA_BOLETAS.mkdir(parents=True, exist_ok=True)
+        destino = CARPETA_BOLETAS / nombre_archivo_comprobante(reserva)
+    return _escribir_pdf(_html_comprobante_reserva(reserva, config_negocio), destino,
+                         f"Reserva {reserva['fecha'][:10]} {reserva['hora_inicio']}",
+                         config_negocio.get("nombre_negocio") or "POS Local")

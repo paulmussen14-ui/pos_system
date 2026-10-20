@@ -9,6 +9,7 @@ Flujo:
     - Al cerrar sesión desde MainWindow -> vuelve a LoginWindow
 """
 
+import faulthandler
 import sys
 import time
 
@@ -26,7 +27,7 @@ from ui.widgets.aviso_datos_antiguos import mostrar_aviso_si_corresponde
 from services.configuracion_service import ConfiguracionService
 from utils.logger import logger
 from utils.retencion import ejecutar_retencion_diaria
-from config import APP_ICON_PATH, APP_LOGO_PATH
+from config import APP_ICON_PATH, APP_LOGO_PATH, LOGS_DIR
 
 
 _ultimo_aviso_error = 0.0
@@ -59,6 +60,14 @@ def _excepthook(tipo, valor, tb) -> None:
 
 
 sys.excepthook = _excepthook
+
+# Si el programa se cierra de golpe por un fallo interno de Qt (sin mensaje de error de Python),
+# aquí queda escrito dónde pasó: %APPDATA%\POSLocal\logs\crash.log
+try:
+    _archivo_crash = open(LOGS_DIR / "crash.log", "a", encoding="utf-8")
+    faulthandler.enable(file=_archivo_crash, all_threads=True)
+except Exception:
+    pass
 
 
 class AppController:

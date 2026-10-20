@@ -8,9 +8,13 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QCheckBox, QMessageBox,
     QFileDialog, QInputDialog, QScrollArea, QFrame, QWidget, QListWidget, QListWidgetItem,
+    QTableWidget, QTableWidgetItem, QHeaderView,
 )
+from shiboken6 import isValid
 
-from printing.boleta_pdf import generar_boleta_pdf, nombre_archivo_boleta
+from printing.boleta_pdf import (
+    generar_boleta_pdf, generar_comprobante_reserva_pdf, nombre_archivo_boleta,
+)
 from printing.ticket_template import ancho_caracteres_por_papel
 from services import correo_service
 from services.caja_service import CajaService
@@ -20,9 +24,13 @@ from services.reserva_service import (
     ReservaService, ReservaError, ESTADO_RESERVADA, ESTADO_ATENDIDA, ESTADO_NO_ASISTIO,
 )
 from services.servicio_service import ServicioService, CLASE_TIPO
+from ui.tokens import ESPACIO_SM, ESPACIO_MD
+from ui.widgets.card import Card
 from ui.widgets.status_badge import StatusBadge
+from ui.widgets.tabla_erp import configurar_tabla_erp, item_derecha
 from ui.widgets.ticket_preview_dialog import TicketPreviewDialog
-from utils.fechas import a_hhmm, a_minutos, fecha_larga, parsear_fecha
+from utils.logger import logger
+from utils.fechas import DIAS_CORTOS, a_hhmm, a_minutos, fecha_dmy, fecha_larga, parsear_fecha
 from utils.validators import es_email_valido, formatear_moneda
 from utils.worker import Worker
 
@@ -68,6 +76,60 @@ def enviar_boleta_por_correo(parent, reserva: dict, destinatario: str) -> None:
     QThreadPool.globalInstance().start(worker)
     QMessageBox.information(parent, "Enviando boleta",
                             f"Enviando la boleta a {destinatario}... Te avisaremos cuando termine.")
+
+
+def enviar_comprobante_reserva_por_correo(reserva_id: int, al_terminar=None) -> None:
+    """Al reservar: envía al cliente un correo avisando que tiene una cita pendiente, con el
+    comprobante de reserva en PDF. Solo si la reserva tiene correo y el correo del negocio
+    está configurado; si no, no hace nada. Va en segundo plano y no interrumpe: solo se
+    muestra algo si el envío falla (la reserva ya quedó guardada). Nunca lanza excepciones."""
+    try:
+        _enviar_comprobante_reserva(reserva_id, al_terminar)
+    except Exception:
+        logger.exception("No se pudo enviar el comprobante de la reserva %s", reserva_id)
+
+
+def _enviar_comprobante_reserva(reserva_id: int, al_terminar=None) -> None:
+    if not correo_service.correo_configurado():
+        logger.info("Reserva %s: correo del negocio sin configurar, no se envía comprobante", reserva_id)
+        if al_terminar:
+            QMessageBox.information(
+                None, "Falta configurar el correo",
+                "Para enviar correos, primero completa los datos en Configuración → Correo.")
+        return
+    reserva = ReservaService().obtener(reserva_id)
+    destinatario = ((reserva or {}).get("cliente_email") or "").strip()
+    if not destinatario or not es_email_valido(destinatario):
+        return
+    config_negocio = ConfiguracionService().obtener()
+    try:
+        ruta_pdf = generar_comprobante_reserva_pdf(reserva, config_negocio)
+    except Exception as exc:
+        logger.exception("No se pudo crear el PDF de la reserva %s", reserva_id)
+        QMessageBox.warning(
+            None, "No se pudo crear el comprobante de la reserva",
+            f"La reserva se guardó, pero no se pudo generar el PDF para {destinatario}.\n\n{exc}")
+        return
+    datos, nombre_negocio = correo_service.cargar_datos_correo()
+    asunto, cuerpo = correo_service.armar_correo_reserva(reserva, config_negocio)
+
+    def terminado(error) -> None:
+        if error:
+            logger.warning("Comprobante de reserva %s no enviado: %s", reserva_id, error)
+            QMessageBox.warning(
+                None, "No se pudo enviar el comprobante de la reserva",
+                f"La reserva se guardó, pero no se pudo enviar el correo a {destinatario}.\n\n{error}")
+        else:
+            logger.info("Comprobante de reserva %s enviado a %s", reserva_id, destinatario)
+            ReservaService().registrar_envio_comprobante(reserva_id, destinatario)
+        if al_terminar:
+            al_terminar()
+
+    worker = Worker(correo_service.enviar_correo_seguro, destinatario, asunto, cuerpo,
+                    [ruta_pdf], datos, nombre_negocio)
+    worker.signals.finished.connect(terminado)
+    worker.signals.error.connect(lambda _: terminado("Ocurrió un error inesperado al enviar."))
+    QThreadPool.globalInstance().start(worker)
 
 
 def avisar_adelanto_por_correo(reserva_id: int, monto: float) -> None:
@@ -165,6 +227,7 @@ class ReservaDialog(QDialog):
         self.reserva = reserva
         self.usuario = usuario
         self.reserva_id: int | None = reserva["id"] if reserva else None
+        self.reserva_nueva_id: int | None = None  # solo si se creó una reserva nueva
         self.service = ReservaService()
         self.servicio_service = ServicioService()
         self.config = ConfiguracionService()
@@ -296,7 +359,7 @@ class ReservaDialog(QDialog):
         self.input_adelanto.setPrefix(f"{self.moneda} ")
         self.input_adelanto.setToolTip("Escribe cuánto deja el cliente ahora. Déjalo en 0 si no hay adelanto.")
         self.input_adelanto.valueChanged.connect(self._actualizar_total)
-        form_adelanto.addRow("Adelanto recibido:", self.input_adelanto)
+        form_adelanto.addRow("Pago recibido (adelanto o total):", self.input_adelanto)
         self.combo_metodo = QComboBox()
         for metodo in self.config.listar_metodos_pago():
             if metodo["activo"]:
@@ -527,8 +590,9 @@ class ReservaDialog(QDialog):
         except ReservaError as e:
             QMessageBox.warning(self, "No se pudo guardar la reserva", str(e))
             return
-        if not self.reserva and adelanto > 0:
-            avisar_adelanto_por_correo(self.reserva_id, adelanto)
+        if not self.reserva:
+            # Reserva nueva: la agenda enviará el comprobante en PDF cuando este diálogo ya se cerró.
+            self.reserva_nueva_id = self.reserva_id
         self.accept()
 
 
@@ -552,7 +616,7 @@ class CobrarDialog(QDialog):
         self._subtotal = reserva["total_estimado"]
         self._adelantos = reserva["adelanto_total"]
 
-        self.setWindowTitle("Cobrar y generar boleta")
+        self.setWindowTitle("Marcar como atendida y cobrar el saldo")
         self.resize(440, 480)
         raiz = QVBoxLayout(self)
 
@@ -627,7 +691,7 @@ class CobrarDialog(QDialog):
         cancelar = QPushButton("Cancelar")
         cancelar.setProperty("class", "secondary")
         cancelar.clicked.connect(self.reject)
-        self.btn_cobrar = QPushButton("Cobrar y generar boleta")
+        self.btn_cobrar = QPushButton("Cobrar saldo y marcar atendida")
         self.btn_cobrar.setProperty("class", "success")
         self.btn_cobrar.clicked.connect(self._cobrar)
         botones.addWidget(cancelar)
@@ -684,7 +748,8 @@ class CobrarDialog(QDialog):
 
 
 class AdelantoDialog(QDialog):
-    """Recibir un adelanto: el monto lo escribe el negocio (hasta lo que falta pagar)."""
+    """Recibir un pago a cuenta (adelanto o el total): el monto lo escribe el negocio, hasta lo que falta.
+    Pagar no marca la cita como atendida."""
 
     def __init__(self, reserva: dict, usuario, parent=None):
         super().__init__(parent)
@@ -694,7 +759,7 @@ class AdelantoDialog(QDialog):
         config = ConfiguracionService()
         self.moneda = config.obtener().get("moneda", "S/")
         falta = round(reserva["total_estimado"] - reserva["adelanto_total"], 2)
-        self.setWindowTitle("Recibir adelanto")
+        self.setWindowTitle("Recibir pago")
         self.setMinimumWidth(380)
 
         raiz = QVBoxLayout(self)
@@ -709,7 +774,7 @@ class AdelantoDialog(QDialog):
         self.input_monto.setRange(0.0, max(falta, 0.0))
         self.input_monto.setDecimals(2)
         self.input_monto.setPrefix(f"{self.moneda} ")
-        formulario.addRow("Monto del adelanto:", self.input_monto)
+        formulario.addRow("Monto recibido:", self.input_monto)
         self.combo_metodo = QComboBox()
         for metodo in config.listar_metodos_pago():
             if metodo["activo"]:
@@ -722,7 +787,7 @@ class AdelantoDialog(QDialog):
         cancelar = QPushButton("Cancelar")
         cancelar.setProperty("class", "secondary")
         cancelar.clicked.connect(self.reject)
-        guardar = QPushButton("Registrar adelanto")
+        guardar = QPushButton("Registrar pago")
         guardar.setProperty("class", "success")
         guardar.clicked.connect(self._guardar)
         botones.addWidget(cancelar)
@@ -754,17 +819,85 @@ class DetalleReservaDialog(QDialog):
         self.reserva_id = reserva_id
         self.cambio = False  # True si algo cambió y la agenda debe refrescarse
         self.setWindowTitle("Reserva")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(600)
+        self.resize(640, 780)
         self._raiz = QVBoxLayout(self)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        contenido = QWidget()
+        self._cuerpo = QVBoxLayout(contenido)
+        self._cuerpo.setContentsMargins(0, 0, 8, 0)
+        self._cuerpo.setSpacing(ESPACIO_MD)
+        area.setWidget(contenido)
+        self._raiz.addWidget(area, 1)
+        self._botones = QVBoxLayout()
+        self._botones.setSpacing(ESPACIO_SM)
+        self._raiz.addLayout(self._botones)
         self._construir()
 
+    # ------------------------------------------------ Piezas de la vista ----
+    @staticmethod
+    def _dato(titulo: str, valor: str, grande: bool = False) -> QWidget:
+        """Un dato con su título pequeño arriba y el valor debajo."""
+        caja = QWidget()
+        lay = QVBoxLayout(caja)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        etiqueta = QLabel(titulo.upper())
+        etiqueta.setProperty("class", "ayuda")
+        texto = QLabel(valor)
+        texto.setWordWrap(True)
+        texto.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        texto.setStyleSheet(f"font-size: {17 if grande else 13}px; font-weight: 700;")
+        lay.addWidget(etiqueta)
+        lay.addWidget(texto)
+        return caja
+
+    @staticmethod
+    def _tabla(columnas: list[str], filas: list[list[str]], derecha=()) -> QTableWidget:
+        """Tabla de solo lectura, sin scroll, que mide justo lo que ocupan sus filas."""
+        tabla = QTableWidget(len(filas), len(columnas))
+        tabla.setHorizontalHeaderLabels(columnas)
+        configurar_tabla_erp(tabla, derecha=derecha, altura_fila=34)
+        tabla.setSelectionMode(QTableWidget.NoSelection)
+        tabla.setFocusPolicy(Qt.NoFocus)
+        tabla.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        for i, fila in enumerate(filas):
+            for j, texto in enumerate(fila):
+                tabla.setItem(i, j, item_derecha(str(texto)) if j in derecha
+                              else QTableWidgetItem(str(texto)))
+        encabezado = tabla.horizontalHeader()
+        encabezado.setFixedHeight(34)
+        encabezado.setSectionResizeMode(0, QHeaderView.Stretch)
+        for j in range(1, len(columnas)):
+            encabezado.setSectionResizeMode(j, QHeaderView.ResizeToContents)
+        tabla.setFixedHeight(34 + 34 * len(filas) + 4)
+        return tabla
+
+    def _estado_correo(self, titulo: str, insignia: StatusBadge, detalle: str, boton=None) -> QWidget:
+        fila = QWidget()
+        lay = QHBoxLayout(fila)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(ESPACIO_SM)
+        nombre = QLabel(titulo)
+        nombre.setStyleSheet("font-weight: 600;")
+        nombre.setMinimumWidth(170)
+        lay.addWidget(nombre)
+        lay.addWidget(insignia)
+        info = QLabel(detalle)
+        info.setProperty("class", "ayuda")
+        info.setWordWrap(True)
+        lay.addWidget(info, 1)
+        if boton:
+            lay.addWidget(boton)
+        return fila
+
     def _construir(self) -> None:
-        while self._raiz.count():
-            item = self._raiz.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            elif item.layout():
-                self._vaciar(item.layout())
+        self._vaciar(self._cuerpo)
+        self._vaciar(self._botones)
 
         r = self.service.obtener(self.reserva_id)
         if not r:
@@ -773,72 +906,159 @@ class DetalleReservaDialog(QDialog):
             return
         self.reserva = r
         moneda = ConfiguracionService().obtener().get("moneda", "S/")
+        dinero = lambda valor: formatear_moneda(valor, moneda)  # noqa: E731
+        atendida = r["estado"] == ESTADO_ATENDIDA
+        total, pagado, saldo = r["total_estimado"], r["adelanto_total"], r["saldo_estimado"]
+        correo = (r.get("cliente_email") or "").strip()
 
+        # --- Cabecera: cliente, servicio y estado ---
         cabecera = QHBoxLayout()
+        bloque = QVBoxLayout()
+        bloque.setSpacing(2)
         titulo = QLabel(r["cliente_nombre"])
-        titulo.setStyleSheet("font-size: 20px; font-weight: 700;")
-        cabecera.addWidget(titulo)
-        cabecera.addStretch()
+        titulo.setStyleSheet("font-size: 22px; font-weight: 700;")
+        servicio = QLabel(r["servicio_nombre"])
+        servicio.setProperty("class", "ayuda")
+        bloque.addWidget(titulo)
+        bloque.addWidget(servicio)
+        cabecera.addLayout(bloque, 1)
         estado = {
             ESTADO_RESERVADA: ("Reservada", "info"),
             ESTADO_ATENDIDA: ("Atendida", "ok"),
             ESTADO_NO_ASISTIO: ("No asistió", "warning"),
         }.get(r["estado"], (r["estado"], "neutral"))
-        cabecera.addWidget(StatusBadge(estado[0], estado[1]))
-        self._raiz.addLayout(cabecera)
-
-        filas = [
-            ("Fecha", fecha_larga(parsear_fecha(r["fecha"])).capitalize()),
-            ("Hora", f"{r['hora_inicio']} a {r['hora_fin']}"),
-            ("Servicio", f"{r['servicio_nombre']}  ({formatear_moneda(r['precio'], moneda)})"),
-        ]
-        for item in r["items"]:
-            etiqueta = "Sub-servicio" if item["tipo"] == "subservicio" else "Producto"
-            cantidad = f" × {item['cantidad']:g}" if item["cantidad"] != 1 else ""
-            costo = (f"+{formatear_moneda(item['subtotal'], moneda)}" if item["subtotal"] > 0
-                     else "incluido")
-            filas.append((etiqueta, f"{item['nombre']}{cantidad}  ({costo})"))
-        filas.append(("Total", formatear_moneda(r["total_estimado"], moneda)))
-        vigentes = [p for p in r["pagos"] if p["estado"] == "vigente"]
-        if vigentes:
-            detalle = ", ".join(f"{formatear_moneda(p['monto'], moneda)} ({p['metodo_nombre']})" for p in vigentes)
-            filas.append(("Adelantos", detalle))
-            if r["estado"] != ESTADO_ATENDIDA:
-                filas.append(("Saldo por pagar", formatear_moneda(r["saldo_estimado"], moneda)))
-        if r.get("cliente_telefono"):
-            filas.append(("Teléfono", r["cliente_telefono"]))
-        if r.get("cliente_email"):
-            filas.append(("Correo", r["cliente_email"]))
-        if r.get("notas"):
-            filas.append(("Notas", r["notas"]))
-        if r["estado"] == ESTADO_ATENDIDA:
-            filas.append(("Boleta", r["boleta_texto"]))
-            filas.append(("Total cobrado", formatear_moneda(r["total"], moneda)))
-            if r.get("adelanto_aplicado"):
-                filas.append(("Saldo pagado", f"{formatear_moneda(r['total'] - r['adelanto_aplicado'], moneda)} "
-                                             f"({r['metodo_pago'] or '—'})"))
+        insignias = QHBoxLayout()
+        insignias.setSpacing(ESPACIO_SM)
+        if not atendida:
+            if self._pagada_completa(r):
+                insignias.addWidget(StatusBadge("Pagado completo", "ok"))
+            elif pagado > 0:
+                insignias.addWidget(StatusBadge(f"Saldo {dinero(saldo)}", "warning"))
             else:
-                filas.append(("Pagó con", r["metodo_pago"] or "—"))
-            if r.get("boleta_enviada_a"):
-                filas.append(("Enviada a", r["boleta_enviada_a"]))
+                insignias.addWidget(StatusBadge("Sin pagos", "neutral"))
+        insignias.addWidget(StatusBadge(*estado))
+        cabecera.addLayout(insignias)
+        self._cuerpo.addLayout(cabecera)
 
+        # --- Cuándo: fecha, hora y duración ---
+        dia = parsear_fecha(r["fecha"])
+        minutos = a_minutos(r["hora_fin"]) - a_minutos(r["hora_inicio"])
+        duracion = (f"{minutos // 60} h" + (f" {minutos % 60} min" if minutos % 60 else "")) if minutos >= 60 \
+            else f"{minutos} min"
+        fila_cuando = QHBoxLayout()
+        fila_cuando.setSpacing(ESPACIO_SM + 4)
+        for nombre, valor in (("Fecha", f"{DIAS_CORTOS[dia.weekday()]} {fecha_dmy(dia)}"),
+                              ("Hora", f"{r['hora_inicio']} – {r['hora_fin']}"),
+                              ("Duración", duracion)):
+            tarjeta = Card(margen=ESPACIO_SM + 4)
+            tarjeta.cuerpo.addWidget(self._dato(nombre, valor, grande=True))
+            fila_cuando.addWidget(tarjeta, 1)
+        self._cuerpo.addLayout(fila_cuando)
+
+        # --- Cliente ---
+        tarjeta = Card("Cliente")
         grilla = QGridLayout()
-        grilla.setHorizontalSpacing(16)
-        grilla.setVerticalSpacing(6)
-        for i, (nombre, valor) in enumerate(filas):
-            etiqueta = QLabel(nombre)
-            etiqueta.setProperty("class", "ayuda")
-            texto = QLabel(valor)
-            texto.setWordWrap(True)
-            texto.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            grilla.addWidget(etiqueta, i, 0, Qt.AlignTop)
-            grilla.addWidget(texto, i, 1)
-        grilla.setColumnStretch(1, 1)
-        self._raiz.addSpacing(8)
-        self._raiz.addLayout(grilla)
-        self._raiz.addSpacing(12)
+        grilla.setHorizontalSpacing(24)
+        grilla.setVerticalSpacing(ESPACIO_SM + 4)
+        grilla.addWidget(self._dato("Teléfono", r.get("cliente_telefono") or "—"), 0, 0)
+        grilla.addWidget(self._dato("Correo", correo or "—"), 0, 1)
+        if r.get("notas"):
+            grilla.addWidget(self._dato("Notas", r["notas"]), 1, 0, 1, 2)
+        grilla.setColumnStretch(0, 1)
+        grilla.setColumnStretch(1, 2)
+        tarjeta.cuerpo.addLayout(grilla)
+        self._cuerpo.addWidget(tarjeta)
 
-        # Dos filas: acciones principales arriba; las secundarias y "Cerrar" abajo.
+        # --- Detalle del servicio ---
+        tarjeta = Card("Detalle del servicio")
+        filas = [[r["servicio_nombre"], "Servicio", dinero(r["precio"])]]
+        for item in r["items"]:
+            cantidad = f" × {item['cantidad']:g}" if item["cantidad"] != 1 else ""
+            tipo = "Sub-servicio" if item["tipo"] == "subservicio" else "Producto"
+            costo = dinero(item["subtotal"]) if item["subtotal"] > 0 else "Incluido"
+            filas.append([f"{item['nombre']}{cantidad}", tipo, costo])
+        tarjeta.cuerpo.addWidget(self._tabla(["Concepto", "Tipo", "Importe"], filas, derecha=(2,)))
+        fila_total = QHBoxLayout()
+        fila_total.addStretch()
+        fila_total.addWidget(QLabel("Total"))
+        monto_total = QLabel(dinero(total))
+        monto_total.setStyleSheet("font-size: 18px; font-weight: 700;")
+        fila_total.addWidget(monto_total)
+        tarjeta.cuerpo.addLayout(fila_total)
+        self._cuerpo.addWidget(tarjeta)
+
+        # --- Pagos ---
+        tarjeta = Card("Pagos")
+        if atendida:
+            tarjeta.agregar_accion(StatusBadge(f"Boleta {r['boleta_texto']}", "ok"))
+        if r["pagos"]:
+            hay_estados = any(p["estado"] != "vigente" for p in r["pagos"])
+            columnas = ["Fecha", "Método", "Monto"] + (["Estado"] if hay_estados else [])
+            filas = []
+            for p in r["pagos"]:
+                fecha = p.get("fecha") or ""
+                cuando = f"{fecha_dmy(parsear_fecha(fecha))} {fecha[11:16]}" if fecha else "—"
+                fila = [cuando, p["metodo_nombre"] or "—", dinero(p["monto"])]
+                if hay_estados:
+                    fila.append({"vigente": "Vigente", "devuelto": "Devuelto",
+                                 "retenido": "Retenido"}.get(p["estado"], p["estado"]))
+                filas.append(fila)
+            tarjeta.cuerpo.addWidget(self._tabla(columnas, filas, derecha=(2,)))
+        else:
+            vacio = QLabel("Todavía no hay pagos registrados.")
+            vacio.setProperty("class", "ayuda")
+            tarjeta.cuerpo.addWidget(vacio)
+        resumen = QHBoxLayout()
+        resumen.setSpacing(ESPACIO_MD)
+        if atendida:
+            datos = [("Total cobrado", dinero(r["total"])),
+                     ("Adelantos aplicados", dinero(r.get("adelanto_aplicado") or 0)),
+                     ("Saldo pagado", f"{dinero(r['total'] - (r.get('adelanto_aplicado') or 0))}"
+                                      f" ({r['metodo_pago'] or '—'})")]
+        else:
+            datos = [("Total", dinero(total)), ("Pagado", dinero(pagado)),
+                     ("Saldo por pagar", dinero(saldo))]
+        for nombre, valor in datos:
+            resumen.addWidget(self._dato(nombre, valor), 1)
+        tarjeta.cuerpo.addLayout(resumen)
+        self._cuerpo.addWidget(tarjeta)
+
+        # --- Correos al cliente ---
+        tarjeta = Card("Correos al cliente")
+        boton_reenviar = None
+        if correo:
+            comprobante_a = (r.get("comprobante_enviado_a") or "").strip()
+            if comprobante_a:
+                insignia = StatusBadge("Enviado", "ok")
+                detalle = comprobante_a
+            else:
+                insignia = StatusBadge("No enviado", "warning")
+                detalle = correo
+            if not atendida and r["estado"] == ESTADO_RESERVADA:
+                boton_reenviar = QPushButton("Reenviar" if comprobante_a else "Enviar ahora")
+                boton_reenviar.setProperty("class", "secondary")
+                boton_reenviar.clicked.connect(self._enviar_comprobante)
+            tarjeta.cuerpo.addWidget(self._estado_correo(
+                "Comprobante de reserva", insignia, detalle, boton_reenviar))
+            if atendida:
+                enviada = (r.get("boleta_enviada_a") or "").strip()
+                tarjeta.cuerpo.addWidget(self._estado_correo(
+                    "Boleta final",
+                    StatusBadge("Enviada", "ok") if enviada else StatusBadge("No enviada", "warning"),
+                    enviada or "Puedes enviarla con «Enviar por correo»."))
+            else:
+                tarjeta.cuerpo.addWidget(self._estado_correo(
+                    "Boleta final", StatusBadge("Pendiente", "neutral"),
+                    "Se envía al marcar la cita como atendida."))
+        else:
+            sin_correo = QLabel("Esta reserva no tiene correo: no se envían comprobantes ni boleta.")
+            sin_correo.setProperty("class", "ayuda")
+            sin_correo.setWordWrap(True)
+            tarjeta.cuerpo.addWidget(sin_correo)
+        self._cuerpo.addWidget(tarjeta)
+        self._cuerpo.addStretch()
+
+        # --- Botones: acciones principales arriba; secundarias y «Cerrar» abajo ---
         fila_a, fila_b = QHBoxLayout(), QHBoxLayout()
         fila_a.setSpacing(8)
         fila_b.setSpacing(8)
@@ -856,11 +1076,11 @@ class DetalleReservaDialog(QDialog):
             boton("Enviar por correo...", "secondary", self._enviar_correo)
         else:
             if r["estado"] == ESTADO_RESERVADA:
-                boton("Cobrar y generar boleta", "success", self._cobrar)
+                boton("Marcar como atendida", "success", self._marcar_atendida)
             else:
                 boton("Volver a reservada", "success", lambda: self._estado(ESTADO_RESERVADA))
             if r["saldo_estimado"] > 0:
-                boton("Recibir adelanto", "secondary", self._adelanto)
+                boton("Recibir pago", "secondary", self._adelanto)
             boton("Editar", "secondary", self._editar)
             if r["estado"] == ESTADO_RESERVADA:
                 boton("No asistió", "secondary", lambda: self._estado(ESTADO_NO_ASISTIO), fila_b)
@@ -868,19 +1088,65 @@ class DetalleReservaDialog(QDialog):
         fila_a.addStretch()
         fila_b.addStretch()
         boton("Cerrar", "secondary", self.accept, fila_b if r["estado"] != ESTADO_ATENDIDA else fila_a)
-        self._raiz.addLayout(fila_a)
+        self._botones.addLayout(fila_a)
         if fila_b.count() > 1:
-            self._raiz.addLayout(fila_b)
+            self._botones.addLayout(fila_b)
+
+    def _enviar_comprobante(self) -> None:
+        """Envía (o reenvía) el comprobante de la reserva y refresca el estado al terminar."""
+        def refrescar() -> None:
+            if isValid(self):
+                self._construir()
+        enviar_comprobante_reserva_por_correo(self.reserva_id, al_terminar=refrescar)
+        QMessageBox.information(self, "Enviando comprobante",
+                                "Enviando el comprobante... Esta pantalla se actualizará al terminar.")
 
     def _vaciar(self, layout) -> None:
         while layout.count():
             item = layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)  # desaparece ya; deleteLater lo libera después
+                widget.deleteLater()
             elif item.layout():
                 self._vaciar(item.layout())
 
+    @staticmethod
+    def _pagada_completa(r: dict) -> bool:
+        """El cliente ya pagó todo por adelantado: no hay saldo, pero la cita sigue pendiente
+        hasta que el negocio confirme que el servicio se realizó."""
+        return r["adelanto_total"] > 0 and r["saldo_estimado"] <= 0
+
     # ----------------------------------------------------- Acciones ----
+    def _marcar_atendida(self) -> None:
+        """El negocio confirma que el servicio ya se realizó. Pagar (adelanto o total) no
+        marca la cita como atendida: eso se valida aquí. Si todavía debe saldo se abre el
+        cobro; si ya pagó todo se confirma y se genera la boleta final, que se envía por
+        correo si el cliente tiene uno."""
+        r = self.reserva
+        if r["saldo_estimado"] > 0:
+            self._cobrar()  # todavía debe saldo: se cobra y recién ahí queda atendida
+            return
+        confirmacion = QMessageBox.question(
+            self, "Marcar como atendida",
+            f"¿Confirmas que {r['cliente_nombre']} ya fue atendida?\n\n"
+            "Se generará su boleta final"
+            + (" y se enviará a su correo." if (r.get("cliente_email") or "").strip() else "."),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if confirmacion != QMessageBox.Yes:
+            return
+        try:
+            reserva = self.service.cobrar(r["id"], self.usuario.id, None)
+        except ReservaError as e:
+            QMessageBox.warning(self, "No se pudo marcar como atendida", str(e))
+            return
+        self.cambio = True
+        correo = (reserva.get("cliente_email") or "").strip()
+        if correo and correo_service.correo_configurado():
+            enviar_boleta_por_correo(self, reserva, correo)
+        BoletaDialog(reserva, self).exec()
+        self._construir()
+
     def _cobrar(self) -> None:
         dialogo = CobrarDialog(self.reserva, self.usuario, self)
         if dialogo.exec() != QDialog.Accepted:

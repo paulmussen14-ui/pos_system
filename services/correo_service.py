@@ -17,7 +17,7 @@ from email.utils import formataddr
 from pathlib import Path
 
 from services.configuracion_service import ConfiguracionService
-from utils.fechas import fecha_dmy, parsear_fecha
+from utils.fechas import fecha_dmy, fecha_larga, parsear_fecha
 from utils.logger import logger
 from utils.validators import es_email_valido, formatear_moneda
 
@@ -167,11 +167,11 @@ def armar_correo_adelanto(reserva: dict, config_negocio: dict, monto: float) -> 
     total = float(reserva.get("total_estimado") or 0)
     adelantos = float(reserva.get("adelanto_total") or 0)
     saldo = max(round(total - adelantos, 2), 0.0)
-    asunto = f"Adelanto recibido - tu cita en {negocio}"
+    asunto = f"Pago recibido - tu cita en {negocio}"
     lineas = [
         f"Hola {reserva['cliente_nombre']},",
         "",
-        f"Recibimos tu adelanto de {formatear_moneda(monto, moneda)}. ¡Gracias! Tu reserva está confirmada.",
+        f"Recibimos tu pago de {formatear_moneda(monto, moneda)}. ¡Gracias! Tu reserva está confirmada.",
         "",
         f"Servicio: {reserva['servicio_nombre']}",
         f"Fecha: {dia}, de {reserva['hora_inicio']} a {reserva['hora_fin']}",
@@ -182,6 +182,41 @@ def armar_correo_adelanto(reserva: dict, config_negocio: dict, monto: float) -> 
         "",
         "Cuando termine tu servicio te enviaremos tu boleta por este mismo medio.",
     ]
+    telefono = (config_negocio.get("telefono") or "").strip()
+    if telefono:
+        lineas += ["", f"Si necesitas reprogramar o tienes alguna consulta, escríbenos al {telefono}."]
+    lineas += ["", negocio]
+    direccion = (config_negocio.get("direccion") or "").strip()
+    if direccion:
+        lineas.append(direccion)
+    return asunto, "\n".join(lineas) + "\n"
+
+
+def armar_correo_reserva(reserva: dict, config_negocio: dict) -> tuple[str, str]:
+    """(asunto, cuerpo) del mensaje que recibe el cliente al reservar, junto con el
+    comprobante de reserva en PDF: avisa que tiene una cita pendiente."""
+    negocio = (config_negocio.get("nombre_negocio") or "").strip() or "Nuestro negocio"
+    moneda = config_negocio.get("moneda", "S/")
+    dia = fecha_larga(parsear_fecha(reserva["fecha"]))
+    total = float(reserva.get("total_estimado") or 0)
+    adelantos = float(reserva.get("adelanto_total") or 0)
+    saldo = max(round(total - adelantos, 2), 0.0)
+    asunto = f"Cita pendiente: {dia}, {reserva['hora_inicio']} - {negocio}"
+    lineas = [
+        f"Hola {reserva['cliente_nombre']},",
+        "",
+        f"Tienes una cita pendiente en {negocio}:",
+        "",
+        f"Fecha: {dia}",
+        f"Hora: {reserva['hora_inicio']} a {reserva['hora_fin']}",
+        f"Servicio: {reserva['servicio_nombre']}",
+        f"Total del servicio: {formatear_moneda(total, moneda)}",
+    ]
+    if adelantos > 0:
+        lineas.append(f"Adelanto recibido: {formatear_moneda(adelantos, moneda)}")
+    lineas.append(f"Saldo por pagar al terminar el servicio: {formatear_moneda(saldo, moneda)}")
+    lineas += ["", "Adjuntamos tu comprobante de reserva en PDF.",
+               "Cuando termine tu servicio te enviaremos tu boleta final por este mismo medio."]
     telefono = (config_negocio.get("telefono") or "").strip()
     if telefono:
         lineas += ["", f"Si necesitas reprogramar o tienes alguna consulta, escríbenos al {telefono}."]

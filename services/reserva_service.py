@@ -573,6 +573,11 @@ class ReservaService:
         with self.db.transaction() as cur:
             cur.execute("UPDATE reservas SET boleta_enviada_a = ? WHERE id = ?", (correo, reserva_id))
 
+    def registrar_envio_comprobante(self, reserva_id: int, correo: str) -> None:
+        """Anota a qué correo se envió el comprobante de la reserva (cita pendiente)."""
+        with self.db.transaction() as cur:
+            cur.execute("UPDATE reservas SET comprobante_enviado_a = ? WHERE id = ?", (correo, reserva_id))
+
     @staticmethod
     def lineas_boleta(reserva: dict) -> list[dict]:
         """Líneas que se muestran en la boleta: el servicio base, cada sub-servicio y cada
