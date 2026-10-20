@@ -1,7 +1,7 @@
 """Pantalla de inicio de sesión (tema oscuro moderno)."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QSizePolicy,
+    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel,
 )
 from PySide6.QtGui import (
     QPixmap, QIcon, QPainter, QPainterPath, QLinearGradient, QRadialGradient, QColor, QPen, QAction,
@@ -96,8 +96,8 @@ class LoginWindow(QWidget):
         self.setWindowTitle("Iniciar sesión")
         if APP_ICON_PATH.exists():
             self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
-        self.resize(960, 600)
-        self.setMinimumSize(820, 520)
+        self.resize(920, 560)
+        self.setMinimumSize(800, 500)
         self.setStyleSheet(self._qss())
 
         raiz = QHBoxLayout(self)
