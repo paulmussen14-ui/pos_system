@@ -25,11 +25,11 @@ from PySide6.QtWidgets import (
 
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QDoubleSpinBox,
 
-    QMessageBox, QSplitter, QDialog
+    QMessageBox, QSplitter, QDialog, QSizePolicy
 
 )
 
-from PySide6.QtCore import Qt, QTimer, QThreadPool, QObject, QEvent
+from PySide6.QtCore import Qt, QTimer, QThreadPool, QObject, QEvent, QPoint
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from services.producto_service import ProductoService
@@ -73,6 +73,22 @@ from ui.widgets.tabla_erp import (
 
 ALTURA_FILA_CARRITO = 44
 
+# --- Responsive (laptops con escala de Windows 125 % / 150 %) ---
+# El carrito nunca baja de esta altura: si la pantalla es muy baja, la página
+# se desplaza (scroll) en vez de aplastar el carrito y encimar los totales.
+ALTURA_MINIMA_CARRITO = 190
+ALTURA_MINIMA_CUERPO = 470          # altura mínima del cuerpo antes de activar el scroll
+ALTURA_MINIMA_CUERPO_BAJA = 400     # idem en pantallas bajas
+ALTURA_MINIMA_CARRITO_BAJA = 110    # carrito mínimo en pantallas bajas
+ANCHO_MINIMO_PANEL_PRODUCTOS = 300
+ANCHO_MINIMO_PANEL_VENTA = 440
+ALTURA_PANTALLA_BAJA = 680          # por debajo de esto se reducen márgenes y espacios
+ANCHO_PANTALLA_ANGOSTA = 1040       # por debajo de esto se acortan los textos de ayuda
+ALTURA_MAX_RESULTADOS_CLIENTE = 200
+ANCHO_PANEL_PARA_CATEGORIA = 420    # panel de productos más angosto que esto: sin columna Categoría
+SUBTITULO_LARGO = "F2 Producto   ·   F4 Cliente   ·   F9 Cobrar   ·   Esc Limpiar búsqueda   ·   Ctrl+N Nueva venta"
+SUBTITULO_CORTO = "F2 Producto  ·  F4 Cliente  ·  F9 Cobrar"
+
 ALTURA_FILA_RESULTADOS = 34
 
 ALTURA_FILA_PRODUCTOS = 40
@@ -91,8 +107,8 @@ ANCHO_COLUMNA_NUMERO = 28
 ANCHO_COLUMNA_QUITAR = 46
 ANCHO_COLUMNA_PRESENTACION = 112
 ANCHO_COLUMNA_CANTIDAD = 82
-ANCHO_COLUMNA_MONTO = 86
-ANCHO_COLUMNA_CATEGORIA = 78
+ANCHO_COLUMNA_MONTO = 80
+ANCHO_COLUMNA_CATEGORIA = 96
 
 # El estilo de las tablas sale del tema (ui/estilos_erp.py): es igual en todas las
 # pantallas y en los dos temas. La constante queda vacía para que los
@@ -229,36 +245,74 @@ class VentasPage(QWidget):
 
     def _construir_ui(self) -> None:
         raiz = QVBoxLayout(self)
+        self._raiz = raiz
         raiz.setContentsMargins(MARGEN_PAGINA, MARGEN_PAGINA, MARGEN_PAGINA, MARGEN_PAGINA)
         raiz.setSpacing(ESPACIO_MD)
 
         # ---- Encabezado de página: título + acciones a la derecha ----
-        encabezado = PageHeader(
-            "Nueva venta",
-            "F2 Producto   ·   F4 Cliente   ·   F9 Cobrar   ·   Esc Limpiar búsqueda   ·   Ctrl+N Nueva venta",
-        )
+        self._encabezado = PageHeader("Nueva venta", SUBTITULO_LARGO)
         btn_limpiar = QPushButton("Limpiar carrito")
         btn_limpiar.setProperty("class", "secondary")
         btn_limpiar.clicked.connect(self._limpiar_carrito)
-        encabezado.agregar_accion(btn_limpiar)
+        self._encabezado.agregar_accion(btn_limpiar)
         btn_ventas_recientes = QPushButton("Ventas recientes")
         btn_ventas_recientes.setProperty("class", "secondary")
         btn_ventas_recientes.clicked.connect(self._ver_ventas_recientes)
-        encabezado.agregar_accion(btn_ventas_recientes)
-        raiz.addWidget(encabezado)
+        self._encabezado.agregar_accion(btn_ventas_recientes)
+        raiz.addWidget(self._encabezado)
 
-        # ---- Cuadrícula: izquierda (productos) 40 % / derecha (cliente y venta) 60 % ----
-        cuerpo = QHBoxLayout()
-        cuerpo.setSpacing(ESPACIO_MD)
-        cuerpo.addWidget(self._construir_panel_izquierdo(), 4)
-        cuerpo.addWidget(self._construir_panel_derecho(), 6)
-        raiz.addLayout(cuerpo, 1)
+        # ---- Cuerpo: productos a la izquierda, resumen/carrito a la derecha ----
+        # Va dentro de un área con scroll: si la ventana es muy baja, aparece la barra
+        # de desplazamiento en lugar de que los bloques se aplasten unos a otros.
+        self._contenido = QWidget()
+        self._contenido.setObjectName("ventasContenido")
+        self._contenido.setMinimumHeight(ALTURA_MINIMA_CUERPO)
+        self._cuerpo = QHBoxLayout(self._contenido)
+        self._cuerpo.setContentsMargins(0, 0, 0, 0)
+        self._cuerpo.setSpacing(ESPACIO_MD)
+        self._cuerpo.addWidget(self._construir_panel_izquierdo(), 3)
+        self._cuerpo.addWidget(self._construir_panel_derecho(), 7)
+
+        self._scroll_cuerpo = QScrollArea()
+        self._scroll_cuerpo.setObjectName("ventasScroll")
+        self._scroll_cuerpo.setWidgetResizable(True)
+        self._scroll_cuerpo.setFrameShape(QFrame.NoFrame)
+        self._scroll_cuerpo.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll_cuerpo.setWidget(self._contenido)
+        raiz.addWidget(self._scroll_cuerpo, 1)
 
         self._configurar_atajos_y_foco()
+        self._adaptar_a_tamano()
+
+    # ------------------------------------------------- Responsive ----
+    def _adaptar_a_tamano(self) -> None:
+        """Ajusta márgenes y textos al tamaño disponible (laptops pequeñas)."""
+        if not hasattr(self, "_raiz"):
+            return
+        bajo = self.height() < ALTURA_PANTALLA_BAJA
+        margen = ESPACIO_SM + 4 if bajo else MARGEN_PAGINA
+        self._raiz.setContentsMargins(margen, margen, margen, margen)
+        self._raiz.setSpacing(ESPACIO_SM if bajo else ESPACIO_MD)
+        self._cuerpo.setSpacing(ESPACIO_SM if bajo else ESPACIO_MD)
+        self._contenido.setMinimumHeight(ALTURA_MINIMA_CUERPO_BAJA if bajo else ALTURA_MINIMA_CUERPO)
+        self._contenedor_carrito.setMinimumHeight(ALTURA_MINIMA_CARRITO_BAJA if bajo else ALTURA_MINIMA_CARRITO)
+        # Con poco ancho, la columna Categoría de la lista de productos se oculta: el nombre
+        # del producto es más importante (las categorías siguen como botones de filtro).
+        ancho_panel = (self.width() - 2 * margen - self._cuerpo.spacing()) * 3 / 10
+        self.tabla_productos.setColumnHidden(0, ancho_panel < ANCHO_PANEL_PARA_CATEGORIA)
+        angosto = self.width() < ANCHO_PANTALLA_ANGOSTA
+        subtitulo = "" if self.height() < 600 else (SUBTITULO_CORTO if angosto else SUBTITULO_LARGO)
+        self._encabezado.set_subtitulo(subtitulo)
+
+    def resizeEvent(self, evento) -> None:
+        super().resizeEvent(evento)
+        self._adaptar_a_tamano()
+        self._posicionar_resultados_clientes()
 
     def _construir_panel_izquierdo(self) -> QWidget:
         """Productos: buscador, categorías como botones y la lista."""
         tarjeta_productos = Card("Productos")
+        tarjeta_productos.setMinimumWidth(ANCHO_MINIMO_PANEL_PRODUCTOS)
         self.input_busqueda_producto = QLineEdit()
         self.input_busqueda_producto.setPlaceholderText("Buscar producto por nombre...  (F2)")
         self.input_busqueda_producto.setClearButtonEnabled(True)
@@ -314,8 +368,10 @@ class VentasPage(QWidget):
 
     def _construir_bloque_cliente(self) -> QWidget:
         """Cliente de la venta, compacto: buscador + cliente elegido en una sola fila.
-        La lista de resultados solo aparece mientras se está buscando."""
+        Los resultados de la búsqueda se muestran FLOTANDO sobre el carrito (no empujan
+        ni aplastan el resto de la pantalla) y solo aparecen mientras se busca."""
         contenedor = QWidget()
+        self._bloque_cliente = contenedor
         columna = QVBoxLayout(contenedor)
         columna.setContentsMargins(0, 0, 0, 0)
         columna.setSpacing(ESPACIO_SM)
@@ -325,16 +381,19 @@ class VentasPage(QWidget):
         self.input_busqueda_cliente = QLineEdit()
         self.input_busqueda_cliente.setPlaceholderText("Buscar cliente...  (F4)")
         self.input_busqueda_cliente.setClearButtonEnabled(True)
+        self.input_busqueda_cliente.setMinimumWidth(150)
         self.input_busqueda_cliente.textChanged.connect(
             lambda: self._timer_busqueda_cliente.start()
         )
         self.input_busqueda_cliente.textChanged.connect(self._actualizar_visibilidad_clientes)
         self.input_busqueda_cliente.returnPressed.connect(self._enter_en_busqueda_cliente)
-        fila.addWidget(self.input_busqueda_cliente, 1)
+        fila.addWidget(self.input_busqueda_cliente, 3)
 
         self.label_cliente_seleccionado = QLabel(TEXTO_VENTA_GENERAL)
         self.label_cliente_seleccionado.setProperty("class", "chip")
-        fila.addWidget(self.label_cliente_seleccionado, 1)
+        self.label_cliente_seleccionado.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.label_cliente_seleccionado.setMinimumWidth(120)
+        fila.addWidget(self.label_cliente_seleccionado, 4)
         btn_quitar_cliente = QPushButton("Quitar")
         btn_quitar_cliente.setProperty("class", "secondary")
         btn_quitar_cliente.clicked.connect(self._quitar_cliente)
@@ -356,22 +415,37 @@ class VentasPage(QWidget):
         fila_libre.addWidget(self.combo_tipo_libre)
         columna.addLayout(fila_libre)
 
-        self.tabla_clientes = QTableWidget(0, 2)
+        # Resultados: tabla flotante, hija de la página (no entra en ningún layout).
+        self.tabla_clientes = QTableWidget(0, 2, self)
+        self.tabla_clientes.setObjectName("resultadosCliente")
         self.tabla_clientes.setHorizontalHeaderLabels(["Nombre", "Teléfono"])
         header_clientes = self.tabla_clientes.horizontalHeader()
         header_clientes.setSectionResizeMode(0, QHeaderView.Stretch)
         header_clientes.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         configurar_tabla_erp(self.tabla_clientes, altura_fila=ALTURA_FILA_RESULTADOS)
-        self.tabla_clientes.setMinimumHeight(78)
-        self.tabla_clientes.setMaximumHeight(150)
         self.tabla_clientes.verticalScrollBar().valueChanged.connect(self._on_scroll_clientes)
         self.tabla_clientes.cellDoubleClicked.connect(self._seleccionar_cliente)
         self.tabla_clientes.setVisible(False)
-        columna.addWidget(self.tabla_clientes)
         return contenedor
 
     def _actualizar_visibilidad_clientes(self) -> None:
         self.tabla_clientes.setVisible(bool(self.input_busqueda_cliente.text().strip()))
+        self._posicionar_resultados_clientes()
+
+    def _posicionar_resultados_clientes(self) -> None:
+        """Coloca la lista de resultados justo debajo del buscador de cliente, por encima
+        de todo lo demás, con el ancho del bloque y sin salirse de la página."""
+        if not hasattr(self, "tabla_clientes") or not self.tabla_clientes.isVisible():
+            return
+        entrada = self.input_busqueda_cliente
+        origen = self._bloque_cliente.mapTo(self, QPoint(0, 0))
+        y = entrada.mapTo(self, QPoint(0, entrada.height() + 4)).y()
+        filas = max(self.tabla_clientes.rowCount(), 1)
+        alto_deseado = 34 + filas * ALTURA_FILA_RESULTADOS + 4
+        alto_libre = max(self.height() - y - 12, 90)
+        alto = min(alto_deseado, ALTURA_MAX_RESULTADOS_CLIENTE, alto_libre)
+        self.tabla_clientes.setGeometry(origen.x(), y, self._bloque_cliente.width(), alto)
+        self.tabla_clientes.raise_()
 
     def _cargar_categorias(self) -> None:
         """Arma los botones de categoría (solo si la lista de categorías cambió)."""
@@ -413,11 +487,14 @@ class VentasPage(QWidget):
 
     def _construir_panel_derecho(self) -> QWidget:
         tarjeta = Card("Resumen de venta")
+        tarjeta.setMinimumWidth(ANCHO_MINIMO_PANEL_VENTA)
         self.badge_items = StatusBadge("0 productos", "neutral")
         tarjeta.agregar_accion(self.badge_items)
         tarjeta.cuerpo.addWidget(self._construir_bloque_cliente())
 
         # ---- Carrito (con estado vacío que se reemplaza por la tabla) ----
+        # Es lo único que se estira; tiene una altura mínima propia para que siempre
+        # se vea la lista de productos aunque la pantalla sea pequeña.
         self.tabla_carrito = QTableWidget(0, 7)
         self.tabla_carrito.setHorizontalHeaderLabels(
             ["#", "Producto", "Presentación", "Cantidad", "Precio", "Subtotal", ""]
@@ -435,41 +512,46 @@ class VentasPage(QWidget):
         self.tabla_carrito.setColumnWidth(0, ANCHO_COLUMNA_NUMERO)
         self.tabla_carrito.setColumnWidth(6, ANCHO_COLUMNA_QUITAR)
         configurar_tabla_erp(self.tabla_carrito, derecha=(4, 5), centro=(0,), altura_fila=ALTURA_FILA_CARRITO)
+        self.tabla_carrito.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         contenedor_carrito = QWidget()
+        self._contenedor_carrito = contenedor_carrito
+        contenedor_carrito.setMinimumHeight(ALTURA_MINIMA_CARRITO)
         self._pila_carrito = QStackedLayout(contenedor_carrito)
         self._pila_carrito.setContentsMargins(0, 0, 0, 0)
         self._pila_carrito.addWidget(self._crear_estado_vacio_carrito())
         self._pila_carrito.addWidget(self.tabla_carrito)
         tarjeta.cuerpo.addWidget(contenedor_carrito, 1)
 
-        # ---- Descuento, método de pago y chofer en una cuadrícula ----
-        def etiqueta(texto: str, margen_superior: int = 0) -> QLabel:
-            lbl = QLabel(texto)
-            lbl.setProperty("class", "ayuda")
-            lbl.setContentsMargins(0, margen_superior, 0, 0)
-            return lbl
+        tarjeta.cuerpo.addWidget(self._construir_pie_cobro())
+        return tarjeta
+
+    def _construir_pie_cobro(self) -> QWidget:
+        """Zona de cobro compacta (siempre visible bajo el carrito):
+        descuento / método de pago / chofer, cupón, y total junto a los botones."""
+        pie = QWidget()
+        pie.setObjectName("pieCobro")
+        columna = QVBoxLayout(pie)
+        columna.setContentsMargins(0, 0, 0, 0)
+        columna.setSpacing(ESPACIO_SM)
 
         self.input_descuento = QDoubleSpinBox()
         self.input_descuento.setMaximum(999999)
-        self.input_descuento.setPrefix("S/ ")
+        self.input_descuento.setPrefix("Desc. S/ ")
+        self.input_descuento.setToolTip("Descuento en soles")
         self.input_descuento.valueChanged.connect(self.actualizar_totales)
         self.combo_metodo_pago = QComboBox()
+        self.combo_metodo_pago.setToolTip("Método de pago")
         self.input_chofer = QLineEdit()
         self.input_chofer.setPlaceholderText("Chofer")
+        self.input_chofer.setToolTip("Chofer (opcional)")
 
-        formulario = QGridLayout()
-        formulario.setHorizontalSpacing(ESPACIO_MD)
-        formulario.setVerticalSpacing(4)
-        for columna in range(3):
-            formulario.setColumnStretch(columna, 1)
-        formulario.addWidget(etiqueta("Descuento"), 0, 0)
-        formulario.addWidget(etiqueta("Método de pago"), 0, 1)
-        formulario.addWidget(etiqueta("Chofer"), 0, 2)
-        formulario.addWidget(self.input_descuento, 1, 0)
-        formulario.addWidget(self.combo_metodo_pago, 1, 1)
-        formulario.addWidget(self.input_chofer, 1, 2)
-        tarjeta.cuerpo.addLayout(formulario)
+        fila_datos = QHBoxLayout()
+        fila_datos.setSpacing(ESPACIO_SM)
+        fila_datos.addWidget(self.input_descuento, 4)
+        fila_datos.addWidget(self.combo_metodo_pago, 4)
+        fila_datos.addWidget(self.input_chofer, 3)
+        columna.addLayout(fila_datos)
 
         # ---- Cupón ----
         fila_cupon = QHBoxLayout()
@@ -487,21 +569,27 @@ class VentasPage(QWidget):
         self.btn_quitar_cupon.clicked.connect(self._quitar_cupon)
         self.btn_quitar_cupon.setVisible(False)
         fila_cupon.addWidget(self.btn_quitar_cupon)
-        tarjeta.cuerpo.addLayout(fila_cupon)
+        columna.addLayout(fila_cupon)
         self.label_cupon = QLabel("")
         self.label_cupon.setProperty("class", "ayuda")
         self.label_cupon.setVisible(False)
-        tarjeta.cuerpo.addWidget(self.label_cupon)
+        columna.addWidget(self.label_cupon)
 
-        # ---- Bloque de total destacado ----
+        # ---- Total (izquierda) + botones de cobro (derecha), en la misma fila ----
+        fila_cobro = QHBoxLayout()
+        fila_cobro.setSpacing(ESPACIO_SM + 4)
+
         caja_total = QFrame()
         caja_total.setObjectName("totalBox")
         v_total = QVBoxLayout(caja_total)
-        v_total.setContentsMargins(ESPACIO_MD, 12, ESPACIO_MD, 12)
-        v_total.setSpacing(6)
+        v_total.setContentsMargins(ESPACIO_MD, 8, ESPACIO_MD, 8)
+        v_total.setSpacing(2)
 
         def fila_resumen(texto: str):
-            fila = QHBoxLayout()
+            """Fila pequeña 'texto ........ valor'. Devuelve (widget de la fila, etiqueta del valor)."""
+            contenedor = QWidget()
+            fila = QHBoxLayout(contenedor)
+            fila.setContentsMargins(0, 0, 0, 0)
             lbl = QLabel(texto)
             lbl.setProperty("class", "ayuda")
             valor = QLabel("S/ 0.00")
@@ -509,37 +597,38 @@ class VentasPage(QWidget):
             fila.addWidget(lbl)
             fila.addStretch()
             fila.addWidget(valor)
-            v_total.addLayout(fila)
-            return valor
+            v_total.addWidget(contenedor)
+            return contenedor, valor
 
-        self.label_subtotal = fila_resumen("Subtotal")
-        self.label_descuento_valor = fila_resumen("Descuento")
-        self.label_cupon_valor = fila_resumen("Cupón")
-        separador = QFrame()
-        separador.setObjectName("separador")
-        v_total.addWidget(separador)
-        fila_total = QHBoxLayout()
+        _, self.label_subtotal = fila_resumen("Subtotal")
+        # Descuento y cupón solo ocupan espacio cuando hay algo que mostrar.
+        self._fila_descuento, self.label_descuento_valor = fila_resumen("Descuento")
+        self._fila_cupon_valor, self.label_cupon_valor = fila_resumen("Cupón")
+        self._fila_descuento.setVisible(False)
+        self._fila_cupon_valor.setVisible(False)
         titulo_total = QLabel("Total a pagar")
         titulo_total.setObjectName("cardHeading")
+        v_total.addWidget(titulo_total)
         self.label_total = QLabel("S/ 0.00")
         self.label_total.setProperty("class", "total")
-        self.label_total.setAlignment(ALINEAR_DERECHA)
-        fila_total.addWidget(titulo_total)
-        fila_total.addStretch()
-        fila_total.addWidget(self.label_total)
-        v_total.addLayout(fila_total)
-        tarjeta.cuerpo.addWidget(caja_total)
+        self.label_total.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        v_total.addWidget(self.label_total)
+        fila_cobro.addWidget(caja_total, 5)
 
-        # ---- Botón principal ----
+        botones = QVBoxLayout()
+        botones.setSpacing(ESPACIO_SM - 2)
         self.btn_registrar = QPushButton("Registrar venta   ·   F9")
         self.btn_registrar.setProperty("class", "success large")
         self.btn_registrar.clicked.connect(self._registrar_venta)
-        tarjeta.cuerpo.addWidget(self.btn_registrar)
+        self.btn_registrar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        botones.addWidget(self.btn_registrar, 2)
         self.btn_proforma = QPushButton("Guardar como proforma")
         self.btn_proforma.setProperty("class", "secondary")
         self.btn_proforma.clicked.connect(self._guardar_proforma)
-        tarjeta.cuerpo.addWidget(self.btn_proforma)
-        return tarjeta
+        botones.addWidget(self.btn_proforma)
+        fila_cobro.addLayout(botones, 5)
+        columna.addLayout(fila_cobro)
+        return pie
 
     def _crear_estado_vacio_carrito(self) -> QWidget:
         """Mensaje que se muestra mientras el carrito no tiene productos."""
@@ -962,6 +1051,7 @@ class VentasPage(QWidget):
                 self.tabla_clientes.setItem(fila, 1, QTableWidgetItem(c.telefono or "-"))
 
         self._clientes_cargados = self.tabla_clientes.rowCount()
+        self._posicionar_resultados_clientes()  # ajusta la altura a la cantidad de resultados
         if self._seleccionar_primer_cliente_al_llegar:
             self._seleccionar_primer_cliente_al_llegar = False
             self._seleccionar_primer_cliente()
@@ -1176,6 +1266,8 @@ class VentasPage(QWidget):
         self.label_descuento_valor.setText(f"- {formatear_moneda(descuento, moneda)}")
         self.label_cupon_valor.setText(f"- {formatear_moneda(descuento_cupon, moneda)}")
         self.label_total.setText(formatear_moneda(total, moneda))
+        self._fila_descuento.setVisible(descuento > 0)
+        self._fila_cupon_valor.setVisible(descuento_cupon > 0)
 
         # Estado de la pantalla según el carrito: mensaje vacío / tabla, contador y botón de cobro.
         cantidad = len(self.carrito)

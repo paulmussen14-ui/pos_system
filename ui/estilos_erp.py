@@ -553,6 +553,41 @@ QWidget#sidebar QPushButton#btnNuevaVenta:hover {
     background-color: #0ea371;
 }
 
+/* ===== Menú lateral adaptable (laptops pequeñas) ===== */
+/* Compacto: solo íconos (se activa por ancho de ventana desde MainWindow). */
+QWidget#sidebar[compacto="true"] {
+    min-width: 72px;
+    max-width: 72px;
+}
+
+QWidget#sidebar[compacto="true"] QPushButton#navItem,
+QWidget#sidebar[compacto="true"] QPushButton#navLogout {
+    margin: 2px 10px;
+    padding: 10px 0px;
+    text-align: center;
+}
+
+QWidget#sidebar[compacto="true"] QWidget#sidebarHeader {
+    border-bottom: 1px solid {{menu_borde}};
+}
+
+/* Bajo: ventana de poca altura, botones del menú más bajitos para que quepan todos. */
+QWidget#sidebar[bajo="true"] QPushButton#navItem,
+QWidget#sidebar[bajo="true"] QPushButton#navLogout {
+    padding: 6px 14px;
+    margin: 0px 12px;
+}
+
+QWidget#sidebar[bajo="true"][compacto="true"] QPushButton#navItem,
+QWidget#sidebar[bajo="true"][compacto="true"] QPushButton#navLogout {
+    padding: 4px 0px;
+    margin: 0px 10px;
+}
+
+QWidget#sidebar[bajo="true"] QLabel#sidebarSection {
+    padding: 8px {{e_lg}}px 2px {{e_lg}}px;
+}
+
 /* ===== Barra superior ===== */
 QWidget#topBar {
     background-color: {{menu_fondo}};

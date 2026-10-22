@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QLabel, QStackedWidget, QButtonGroup, QFrame
 )
 from PySide6.QtCore import Qt, QSize, QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtGui import QIcon, QPixmap
 
 from ui.dashboard.dashboard_page import DashboardPage
@@ -44,9 +45,18 @@ ICONO_MENU = 20
 NOMBRE_NEGOCIO_POR_DEFECTO = "Mi Negocio"
 
 ALTO_BARRA_SUPERIOR = 80
+ALTO_BARRA_SUPERIOR_BAJA = 56
+# Responsive: laptops con escala de Windows (125 % / 150 %) tienen muy pocos píxeles lógicos.
+ANCHO_VENTANA_MENU_COMPACTO = 1200   # por debajo de este ancho el menú pasa a solo íconos
+ALTO_VENTANA_BAJA = 720              # por debajo de esta altura se compactan menú y barra superior
+ANCHO_SIDEBAR_COMPACTO = 72
+ANCHO_MINIMO_VENTANA = 860
+ALTO_MINIMO_VENTANA = 450
+ALTO_OCULTAR_LOGO_MENU = 520         # menú compacto + ventana más baja que esto: sin logo arriba
+ANCHO_FECHA_VISIBLE = 1000           # por debajo de este ancho se oculta la fecha de la barra superior
 # Por debajo de esta altura de ventana se oculta la tarjeta "Nueva venta" del menú
 # para que todos los botones sigan cabiendo sin desplazarse.
-ALTO_MINIMO_TARJETA_MENU = 780
+ALTO_MINIMO_TARJETA_MENU = 820
 
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
@@ -91,8 +101,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Sistema POS Local - FayzerDEV")
         if APP_ICON_PATH.exists():
             self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
-        self.setMinimumSize(1100, 680)
-        self.resize(1366, 768)
+        # Mínimo pequeño para que la ventana quepa también en laptops con escala de pantalla alta.
+        self.setMinimumSize(ANCHO_MINIMO_VENTANA, ALTO_MINIMO_VENTANA)
+        disponible = QGuiApplication.primaryScreen().availableGeometry()
+        self.resize(min(1366, disponible.width()), min(768, disponible.height()))
 
         self._construir_ui()
         self._aplicar_tema(self.config_service.obtener().get("tema", "claro"))
@@ -167,18 +179,25 @@ class MainWindow(QMainWindow):
 
         btn_cerrar_sesion = QPushButton("  Cerrar sesión")
         btn_cerrar_sesion.setObjectName("navLogout")
+        btn_cerrar_sesion.setProperty("textoMenu", "  Cerrar sesión")
         btn_cerrar_sesion.setCursor(Qt.PointingHandCursor)
         btn_cerrar_sesion.setIconSize(QSize(ICONO_MENU, ICONO_MENU))
         btn_cerrar_sesion.clicked.connect(self._cerrar_sesion)
         self._iconos_menu["__salir__"] = (btn_cerrar_sesion, "salir")
         layout_sidebar.addWidget(btn_cerrar_sesion)
 
+        self.pie_sidebar = None
         if PIE_SIDEBAR:
             pie = QLabel(PIE_SIDEBAR)
             pie.setObjectName("sidebarPie")
             layout_sidebar.addWidget(pie)
+            self.pie_sidebar = pie
 
         self.sidebar = sidebar
+        self.encabezado_sidebar = sidebar.findChild(QWidget, "sidebarHeader")
+        self._sidebar_manual = None   # None = automático; True/False = lo decidió el usuario con ☰
+        self._menu_compacto = False
+        self._ventana_baja = False
         columna_derecha = QWidget()
         layout_derecha = QVBoxLayout(columna_derecha)
         layout_derecha.setContentsMargins(0, 0, 0, 0)
@@ -272,6 +291,7 @@ class MainWindow(QMainWindow):
         """Barra verde sobre el contenido: botón de menú, bienvenida, fecha y hora, y usuario."""
         barra = QWidget()
         barra.setObjectName("topBar")
+        self.barra_superior = barra
         barra.setFixedHeight(ALTO_BARRA_SUPERIOR)
         layout = QHBoxLayout(barra)
         layout.setContentsMargins(ESPACIO_MD + 4, 0, ESPACIO_LG, 0)
@@ -283,7 +303,7 @@ class MainWindow(QMainWindow):
         self.boton_menu.setIconSize(QSize(22, 22))
         self.boton_menu.setIcon(icono("menu", "#ffffff", 22))
         self.boton_menu.setToolTip("Mostrar u ocultar el menú")
-        self.boton_menu.clicked.connect(lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
+        self.boton_menu.clicked.connect(self._alternar_menu)
         layout.addWidget(self.boton_menu)
 
         bienvenida = QLabel("Bienvenido")
@@ -341,7 +361,77 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if hasattr(self, "tarjeta_venta"):
-            self.tarjeta_venta.setVisible(self.height() >= ALTO_MINIMO_TARJETA_MENU)
+            self.tarjeta_venta.setVisible(self.height() >= ALTO_MINIMO_TARJETA_MENU and not self._menu_compacto)
+        self._adaptar_a_tamano()
+
+    def _alternar_menu(self) -> None:
+        """Botón ☰: en ventanas angostas alterna entre menú de íconos y menú completo;
+        en ventanas anchas oculta o muestra el menú."""
+        if self.width() < ANCHO_VENTANA_MENU_COMPACTO:
+            # Alterna el modo del menú (completo <-> íconos) y recuerda la elección.
+            self._aplicar_modo_menu(compacto=not self._menu_compacto)
+            self._sidebar_manual = self._menu_compacto
+        else:
+            self.sidebar.setVisible(not self.sidebar.isVisible())
+
+    def _adaptar_a_tamano(self) -> None:
+        """Responsive: menú de solo íconos en ventanas angostas, y barra/menú más bajos en
+        ventanas de poca altura. Se recalcula al cambiar el tamaño de la ventana."""
+        if not hasattr(self, "sidebar"):
+            return
+        angosta = self.width() < ANCHO_VENTANA_MENU_COMPACTO
+        if self._sidebar_manual is None or not angosta:
+            # Automático; si la ventana vuelve a ser ancha se olvida la elección manual.
+            if not angosta:
+                self._sidebar_manual = None
+            self._aplicar_modo_menu(compacto=angosta)
+
+        baja = self.height() < ALTO_VENTANA_BAJA
+        if baja != self._ventana_baja:
+            self._ventana_baja = baja
+            self.sidebar.setProperty("bajo", baja)
+            self._repintar_estilo(self.sidebar)
+            self.barra_superior.setFixedHeight(ALTO_BARRA_SUPERIOR_BAJA if baja else ALTO_BARRA_SUPERIOR)
+
+        self.label_fecha_hora.setVisible(self.width() >= ANCHO_FECHA_VISIBLE)
+        # En pantallas muy bajas el logo del menú se oculta para que quepan todos los botones.
+        self.encabezado_sidebar.setVisible(not (self._menu_compacto and self.height() < ALTO_OCULTAR_LOGO_MENU))
+
+    def _aplicar_modo_menu(self, compacto: bool) -> None:
+        """Cambia el menú entre completo (íconos + texto) y compacto (solo íconos con tooltip)."""
+        if compacto == self._menu_compacto and self.sidebar.property("compacto") == compacto:
+            return
+        self._menu_compacto = compacto
+        self.sidebar.setProperty("compacto", compacto)
+        for boton, _ in self._iconos_menu.values():
+            texto = boton.property("textoMenu") or ""
+            boton.setText("" if compacto else texto)
+            boton.setToolTip(texto.strip() if compacto else "")
+        self._actualizar_titulos_grupo()
+        self.tarjeta_logo.setVisible(not compacto and self._logo_cargado is not None)
+        self.label_negocio.setVisible(not compacto)
+        self.label_inicial.setVisible(compacto or self._logo_cargado is None)
+        if self.pie_sidebar is not None:
+            self.pie_sidebar.setVisible(not compacto)
+        self.tarjeta_venta.setVisible(self.height() >= ALTO_MINIMO_TARJETA_MENU and not compacto)
+        margen = ESPACIO_SM if compacto else ESPACIO_MD
+        self.encabezado_sidebar.layout().setContentsMargins(margen, ESPACIO_MD, margen, ESPACIO_MD)
+        self._repintar_estilo(self.sidebar)
+
+    def _actualizar_titulos_grupo(self) -> None:
+        """Muestra el título de cada grupo del menú solo si el menú es completo y el grupo
+        tiene alguna pantalla visible en el modelo de negocio actual."""
+        ocultas = PAGINAS_SOLO_VENTAS if self._modelo == MODELO_SERVICIOS else PAGINAS_SOLO_SERVICIOS
+        for etiqueta, nombres in self._titulos_grupo.values():
+            etiqueta.setVisible(not self._menu_compacto and any(n not in ocultas for n in nombres))
+
+    @staticmethod
+    def _repintar_estilo(widget: QWidget) -> None:
+        """Aplica de nuevo los estilos tras cambiar una propiedad dinámica (ej. [compacto="true"])."""
+        for w in [widget] + widget.findChildren(QWidget):
+            w.style().unpolish(w)
+            w.style().polish(w)
+        widget.updateGeometry()
 
     def _accion_tarjeta(self) -> None:
         """Botón de la tarjeta del menú: nueva venta, o nueva reserva si el negocio da servicios."""
@@ -361,8 +451,7 @@ class MainWindow(QMainWindow):
         for nombre in PAGINAS_SOLO_VENTAS | PAGINAS_SOLO_SERVICIOS:
             boton, _ = self._iconos_menu[nombre]
             boton.setVisible(nombre not in ocultas)
-        for etiqueta, nombres in self._titulos_grupo.values():
-            etiqueta.setVisible(any(n not in ocultas for n in nombres))
+        self._actualizar_titulos_grupo()
 
         # El dashboard adapta sus accesos rápidos al modelo (Nueva reserva en vez de Nueva venta).
         self.paginas["Inicio"].aplicar_modelo(self._modelo)
@@ -399,6 +488,8 @@ class MainWindow(QMainWindow):
 
         boton = QPushButton("  " + nombre)
         boton.setObjectName("navItem")
+        boton.setProperty("textoMenu", "  " + nombre)
+        boton.setToolTip("")  # el tooltip solo se pone en modo compacto
         boton.setCheckable(True)
         boton.setCursor(Qt.PointingHandCursor)
         boton.setIconSize(QSize(ICONO_MENU, ICONO_MENU))
@@ -429,6 +520,7 @@ class MainWindow(QMainWindow):
         config = self.config_service.obtener()
         negocio = (config.get("nombre_negocio") or "").strip() or NOMBRE_NEGOCIO_POR_DEFECTO
         self.label_negocio.setText(negocio)
+        self.label_inicial.setText(negocio[:1].upper() or "?")
         self._actualizar_logo(config.get("logo_path"), negocio)
 
         if hasattr(self, "label_usuario_barra"):
@@ -455,8 +547,8 @@ class MainWindow(QMainWindow):
             ajustado = pixmap.scaled(ancho, alto, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             ajustado.setDevicePixelRatio(escala)
             self.label_logo.setPixmap(ajustado)
-            self.tarjeta_logo.setVisible(True)
-            self.label_inicial.setVisible(False)
+            self.tarjeta_logo.setVisible(not self._menu_compacto)
+            self.label_inicial.setVisible(self._menu_compacto)
         else:
             self.label_inicial.setText(negocio[:1].upper() or "?")
             self.tarjeta_logo.setVisible(False)
