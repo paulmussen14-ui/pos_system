@@ -1,5 +1,5 @@
 ﻿#define MyAppName "POSLocal"
-#define MyAppVersion "2.2.2"
+#define MyAppVersion "2.2.3"
 #define MyAppExeName "POSLocal.exe"
 
 [Setup]

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "POSLocal"
-APP_VERSION = "2.2.2"
+APP_VERSION = "2.2.3"
 
 
 def _get_app_data_dir() -> Path:

@@ -35,7 +35,7 @@ from config import STYLES_DIR, APP_ICON_PATH, APP_VERSION
 # del menú arriba (sirve para logos anchos tipo banner y para logos cuadrados),
 # con un margen interno para que no toque el borde de la tarjeta blanca.
 ANCHO_LOGO = ANCHO_SIDEBAR - 2 * ESPACIO_MD
-ALTO_LOGO = 104
+ALTO_LOGO = 76
 MARGEN_LOGO = 8
 # Si el negocio no tiene logo: cuadro con la inicial del nombre.
 TAMANO_INICIAL = 48
@@ -79,9 +79,9 @@ MENU_GRUPOS = [
 ]
 
 # Qué se ve en el menú según el modelo de negocio (Configuración → Modelo de negocio).
-# Lo que no está en ninguna lista se ve siempre (Inicio, Caja, Clientes, RRHH, Cupones, Reportes, Configuración).
+# Lo que no está en ninguna lista se ve siempre (Inicio, Caja, Clientes, RRHH, Reportes, Configuración).
 # Productos, Compras e Inventario se quedan: los servicios pueden usar productos (descuentan stock).
-PAGINAS_SOLO_VENTAS = {"Ventas", "Proformas"}
+PAGINAS_SOLO_VENTAS = {"Ventas", "Proformas", "Cupones"}
 PAGINAS_SOLO_SERVICIOS = {"Servicios", "Agenda"}
 
 
@@ -97,6 +97,13 @@ class MainWindow(QMainWindow):
         self._logo_cargado = None   # (ruta, fecha de modificación) del logo mostrado
         self._modelo = self.config_service.obtener_modelo_negocio()
         self._titulos_grupo = {}    # título del grupo -> (etiqueta, nombres de sus páginas)
+        # Estado del menú adaptable. Debe existir ANTES de _construir_ui(): al armar el
+        # encabezado se carga el logo y ese código ya lo consulta.
+        self._menu_compacto = False
+        self._ventana_baja = False
+        self._sidebar_manual = None   # None = automático; True/False = lo decidió el usuario con ☰
+        self.pie_sidebar = None
+        self.encabezado_sidebar = None
 
         self.setWindowTitle("Sistema POS Local - FayzerDEV")
         if APP_ICON_PATH.exists():
@@ -247,7 +254,6 @@ class MainWindow(QMainWindow):
         self.label_negocio = QLabel(NOMBRE_NEGOCIO_POR_DEFECTO)
         self.label_negocio.setObjectName("sidebarTitle")
         self.label_negocio.setWordWrap(True)
-        self.label_negocio.setAlignment(Qt.AlignCenter)
         bloque_texto.addWidget(self.label_negocio)
 
         fila_identidad.addLayout(bloque_texto, stretch=1)
